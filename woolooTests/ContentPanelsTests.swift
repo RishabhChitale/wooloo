@@ -146,6 +146,10 @@ final class ContentPanelsTests: XCTestCase {
         commands.selectTab(first)
         XCTAssertEqual(documents.activeID, second, "The main panel keeps its document")
         XCTAssertEqual(window.focusedPanel, firstContent)
+        XCTAssertEqual(commands.focusedTabID, first, "The titlebar follows the focused split, not the main selection")
+        commands.focusPanel(.main)
+        XCTAssertEqual(commands.focusedTabID, second)
+        commands.focusPanel(firstContent)
 
         // Opening it some other way, as from the explorer, does the same.
         commands.focusPanel(.main)
@@ -165,6 +169,28 @@ final class ContentPanelsTests: XCTestCase {
         XCTAssertEqual(commands.panelLayout, .single)
         XCTAssertEqual(window.focusedPanel, .main)
         XCTAssertTrue(window.panelLayouts.isEmpty)
+    }
+
+    func testSelectingSearchInASplitRequestsFocusWithoutReplacingTheMainEditor() {
+        let (commands, documents, window) = makeCommands()
+        commands.openSearch(replace: true)
+        commands.splitTab(WorkspaceSearchModel.tabID, edge: .right)
+        let document = documents.newUntitled(at: location)
+        commands.selectTab(document)
+        let previousFocusRequest = commands.search.focusRequest
+
+        // The all-tabs menu selects an existing Search view without making it reappear.
+        commands.selectTab(WorkspaceSearchModel.tabID)
+
+        XCTAssertEqual(documents.activeID, document, "The main editor must stay open")
+        XCTAssertEqual(window.focusedPanel, .search)
+        XCTAssertEqual(commands.search.focusRequest, previousFocusRequest + 1,
+                       "Selecting the panel must also request keyboard focus for its search field")
+        XCTAssertTrue(commands.search.showsReplace, "Selecting Search preserves its existing state")
+
+        commands.selectTab(WorkspaceSearchModel.tabID)
+        XCTAssertEqual(commands.search.focusRequest, previousFocusRequest + 2,
+                       "Reselecting Search must focus its query field even if its panel is already selected")
     }
 
     func testSearchSplitsLikeADocument() {

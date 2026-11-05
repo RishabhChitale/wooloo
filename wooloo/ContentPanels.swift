@@ -451,6 +451,9 @@ extension ContentCommands {
         tabID(of: focusedPanel)
     }
 
+    /// The titlebar follows the focused split, even when the main panel's selection stays put.
+    var focusedTabID: String? { focusedDocumentID ?? herdr.selectedTabID }
+
     func focusPanel(_ content: PanelContent) {
         let content = panelLayout.contains(content) ? content : .main
         if window.focusedPanel != content { window.focusedPanel = content }
@@ -468,6 +471,7 @@ extension ContentCommands {
             documents.activeID = id
             focusPanel(.main)
         }
+        if id == WorkspaceSearchModel.tabID { search.requestFocus() }
     }
 
     /// Keeps the rule that a tab shows in one place: a document or Search made active (opened
