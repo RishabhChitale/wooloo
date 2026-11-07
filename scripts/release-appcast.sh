@@ -14,7 +14,7 @@ task_archive=$1
 task_notes=$2
 task_tag=$3
 task_output=$4
-task_repository=${GITHUB_REPOSITORY:-rarce/wooloo}
+task_repository=${GITHUB_REPOSITORY:-RishabhChitale/wooloo}
 
 task_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 task_version=2.10.0
