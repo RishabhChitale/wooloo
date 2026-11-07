@@ -724,4 +724,40 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(CompanionScene.zoomAnchor(spriteRect: [500, 500, 50, 50], backgroundSize: size).x, 1,
                        "a rectangle outside the background stays inside the unit square")
     }
+
+    func testVisibleBoundsFindsTheOpaquePixels() throws {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 10, height: 8, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        // Context origin is bottom-left: this is the top-right 2x2 block of the image.
+        context.fill(CGRect(x: 6, y: 6, width: 2, height: 2))
+        let image = try XCTUnwrap(context.makeImage())
+        let bounds = try XCTUnwrap(CompanionSprite.visibleBounds(of: image))
+        XCTAssertEqual(bounds.minX, 0.6, accuracy: 0.001)
+        XCTAssertEqual(bounds.minY, 0, accuracy: 0.001)
+        XCTAssertEqual(bounds.width, 0.2, accuracy: 0.001)
+        XCTAssertEqual(bounds.height, 0.25, accuracy: 0.001)
+
+        let empty = try XCTUnwrap(CGContext(data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 0,
+                                            space: CGColorSpaceCreateDeviceRGB(),
+                                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)?.makeImage())
+        XCTAssertNil(CompanionSprite.visibleBounds(of: empty))
+    }
+
+    func testZoomAnchorFollowsVisibleBounds() {
+        let visible = CGRect(x: 0.5, y: 0, width: 0.5, height: 0.5)
+        // Image 100x100 fitted into a 100x200 rect at (50, 0): shown 100x100, vertically centered at y 50.
+        let anchor = CompanionScene.zoomAnchor(spriteRect: [50, 0, 100, 200], backgroundSize: CGSize(width: 200, height: 400),
+                                               imageSize: CGSize(width: 100, height: 100), visible: visible)
+        XCTAssertEqual(anchor.x, (50 + 75) / 200, accuracy: 0.0001)
+        XCTAssertEqual(anchor.y, (50 + 25) / 400, accuracy: 0.0001)
+        let plain = CompanionScene.zoomAnchor(visible: visible, imageSize: CGSize(width: 10, height: 10),
+                                              area: CGSize(width: 100, height: 100))
+        XCTAssertEqual(plain.x, 0.75, accuracy: 0.0001)
+        XCTAssertEqual(plain.y, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(CompanionScene.zoomAnchor(spriteRect: [0, 0, 50, 50], backgroundSize: CGSize(width: 100, height: 100),
+                                                 imageSize: .zero, visible: nil).x, 0.25, accuracy: 0.0001,
+                       "no visible bounds: the sprite_rect center")
+    }
 }

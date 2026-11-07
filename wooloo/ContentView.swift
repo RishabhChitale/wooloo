@@ -343,7 +343,7 @@ private struct DestinationContentView: View {
                 VStack(spacing: 0) {
                     CompanionPanel(store: herdr, agents: herdr.snapshot?.agents ?? [], workspaceID: herdr.selectedWorkspaceID,
                                    width: filesSidebarWidth, maxHeight: rightSidebarHeight * 0.65)
-                    filesSidebarSpaces(fillsHeight: !showsExplorer && !showsGitHub)
+                    filesSidebarSpaces
                     ActiveTasksSection(selectedSpace: herdr.selectedWorkspaceID, location: explorerLocation)
                     HStack(spacing: 12) {
                         Spacer()
@@ -367,7 +367,10 @@ private struct DestinationContentView: View {
                     .padding(.horizontal, 11)
                     .frame(height: typography.metric(24))
                     Divider()
-                    if showsExplorer || showsGitHub {
+                    if !showsExplorer && !showsGitHub {
+                        // Every section keeps its natural height; the rest is empty at the bottom.
+                        Spacer(minLength: 0)
+                    } else {
                     WorkspaceBrowserView(location: explorerLocation,
                                      machine: explorerMachine,
                                      refreshVersion: window.fileRefreshVersion,
@@ -495,8 +498,8 @@ private struct DestinationContentView: View {
 
     /// The Spaces list on top of the right sidebar, so Spaces stay reachable with the left sidebar
     /// hidden. It is as tall as its rows, up to about six, and scrolls beyond that.
-    private func filesSidebarSpaces(fillsHeight: Bool) -> some View {
-        let scroll = ScrollView {
+    private var filesSidebarSpaces: some View {
+        ScrollView {
             spacesSection
                 .padding(7)
                 .background {
@@ -507,11 +510,7 @@ private struct DestinationContentView: View {
                     }
                 }
         }
-        if fillsHeight {
-            // Neither Files nor GitHub below: the Spaces take the height that is left.
-            return AnyView(scroll.frame(maxHeight: .infinity, alignment: .top))
-        }
-        return AnyView(scroll.frame(height: min(spacesContentHeight, typography.metric(210))))
+        .frame(height: min(spacesContentHeight, typography.metric(210)))
     }
 
     private var sidebar: some View {

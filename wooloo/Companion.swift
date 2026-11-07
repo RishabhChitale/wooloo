@@ -808,6 +808,19 @@ final class CompanionModel: ObservableObject {
 
     func image(forPath path: String) -> CGImage? { images[path] }
 
+    private var visibleCache: [ObjectIdentifier: (image: CGImage, bounds: CGRect?)] = [:]
+
+    /// The visible (non-transparent) part of `image` as a rectangle of 0...1 fractions, found
+    /// once per frame image and kept.
+    func visibleBounds(of image: CGImage) -> CGRect? {
+        let key = ObjectIdentifier(image)
+        if let cached = visibleCache[key], cached.image === image { return cached.bounds }
+        let bounds = CompanionSprite.visibleBounds(of: image)
+        if visibleCache.count > 512 { visibleCache.removeAll() }
+        visibleCache[key] = (image, bounds)
+        return bounds
+    }
+
     func image(at now: Date) -> CGImage? {
         guard let sequence = player.sequence, let frames = loaded[sequence.dir]?.images, !frames.isEmpty else { return nil }
         return frames[min(player.frameIndex(at: now), frames.count - 1)]
@@ -874,6 +887,7 @@ struct CompanionView: View {
                 CompanionScene(background: model.backgroundImage(at: context.date),
                                spriteRect: model.manifest?.spriteRect,
                                sprite: model.image(at: context.date),
+                               spriteVisible: model.image(at: context.date).flatMap { model.visibleBounds(of: $0) },
                                zoom: CompanionPreferences.clampedZoom(zoom))
                 if let text = model.player.bubbleText(dialogue: model.dialogue,
                                                       title: commander?.terminalTitleStripped) {
@@ -923,8 +937,37 @@ struct CompanionScene: View {
     let background: CGImage?
     let spriteRect: [Double]?
     let sprite: CGImage?
+    /// The part of the sprite image that is not transparent, as 0...1 fractions (top-left origin).
+    var spriteVisible: CGRect?
     /// The whole scene is magnified by this much around her sprite's center.
     var zoom: Double = 1
+
+    /// The unit point to zoom around: the center of what is visible of the sprite image, which
+    /// is fitted into `spriteRect` (background pixels) or, with `spriteRect` nil, into the whole
+    /// area of `size`. Without visible bounds, the center of `spriteRect`, else the middle.
+    static func zoomAnchor(spriteRect: [Double]?, backgroundSize size: CGSize,
+                           imageSize: CGSize, visible: CGRect?) -> UnitPoint {
+        guard let visible, let rect = spriteRect, rect.count == 4, rect.allSatisfy(\.isFinite),
+              size.width > 0, size.height > 0, imageSize.width > 0, imageSize.height > 0,
+              rect[2] > 0, rect[3] > 0 else {
+            return zoomAnchor(spriteRect: spriteRect, backgroundSize: size)
+        }
+        let fit = min(rect[2] / imageSize.width, rect[3] / imageSize.height)
+        let shown = CGSize(width: imageSize.width * fit, height: imageSize.height * fit)
+        let x = rect[0] + (rect[2] - shown.width) / 2 + visible.midX * shown.width
+        let y = rect[1] + (rect[3] - shown.height) / 2 + visible.midY * shown.height
+        return UnitPoint(x: min(max(x / size.width, 0), 1), y: min(max(y / size.height, 0), 1))
+    }
+
+    /// Without a background the sprite fills the area, so the anchor is the visible center.
+    static func zoomAnchor(visible: CGRect?, imageSize: CGSize, area: CGSize) -> UnitPoint {
+        guard let visible, imageSize.width > 0, imageSize.height > 0, area.width > 0, area.height > 0 else { return .center }
+        let fit = min(area.width / imageSize.width, area.height / imageSize.height)
+        let shown = CGSize(width: imageSize.width * fit, height: imageSize.height * fit)
+        let x = (area.width - shown.width) / 2 + visible.midX * shown.width
+        let y = (area.height - shown.height) / 2 + visible.midY * shown.height
+        return UnitPoint(x: min(max(x / area.width, 0), 1), y: min(max(y / area.height, 0), 1))
+    }
 
     /// Where the sprite's center is within a background of `size`, as a unit point, for the
     /// zoom to scale around. The middle when there is no usable rectangle.
@@ -962,7 +1005,10 @@ struct CompanionScene: View {
                     }
                 }
                 .frame(width: size.width * scale, height: size.height * scale)
-                .scaleEffect(zoom, anchor: Self.zoomAnchor(spriteRect: rect, backgroundSize: size))
+                .scaleEffect(zoom, anchor: Self.zoomAnchor(
+                    spriteRect: rect, backgroundSize: size,
+                    imageSize: sprite.map { CGSize(width: $0.width, height: $0.height) } ?? .zero,
+                    visible: spriteVisible))
                 .frame(width: area.size.width, height: area.size.height)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             } else if let sprite {
@@ -971,7 +1017,9 @@ struct CompanionScene: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: area.size.width, height: area.size.height)
-                    .scaleEffect(zoom)
+                    .scaleEffect(zoom, anchor: Self.zoomAnchor(
+                        visible: spriteVisible, imageSize: CGSize(width: sprite.width, height: sprite.height),
+                        area: area.size))
                     .clipped()
             }
         }
@@ -1011,5 +1059,39 @@ private struct CompanionBubble: View {
             path.closeSubpath()
             return path
         }
+    }
+}
+
+/// Facts about a sprite frame's pixels.
+enum CompanionSprite {
+    /// The smallest rectangle, in 0...1 fractions of the image with the origin at the top left,
+    /// that holds every pixel with some alpha; nil when the image is fully transparent or empty.
+    static func visibleBounds(of image: CGImage) -> CGRect? {
+        let width = image.width, height = image.height
+        guard width > 0, height > 0, width * height <= 16_000_000 else { return nil }
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height,
+                                          bitsPerComponent: 8, bytesPerRow: width * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return nil }
+        var minX = width, maxX = -1, minY = height, maxY = -1
+        for y in 0..<height {
+            let row = y * width * 4
+            for x in 0..<width where pixels[row + x * 4 + 3] != 0 {
+                if x < minX { minX = x }
+                if x > maxX { maxX = x }
+                if y < minY { minY = y }
+                maxY = y
+            }
+        }
+        guard maxX >= 0 else { return nil }
+        return CGRect(x: Double(minX) / Double(width), y: Double(minY) / Double(height),
+                      width: Double(maxX - minX + 1) / Double(width),
+                      height: Double(maxY - minY + 1) / Double(height))
     }
 }
