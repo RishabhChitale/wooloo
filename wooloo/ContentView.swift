@@ -75,6 +75,7 @@ private struct DestinationContentView: View {
     @AppStorage("FilesSidebarWidth") private var filesSidebarWidth = 244.0
     @AppStorage("AgentsInSelectedSpaceOnly") private var agentsInSelectedSpaceOnly = false
     @State private var followsHerdrAgentView = true
+    @State private var spacesContentHeight: CGFloat = 0
     @State private var connectionRequest = UUID()
     @State private var popupDocument: (session: String, space: String?, tab: String?, document: String)?
 
@@ -336,7 +337,10 @@ private struct DestinationContentView: View {
             if window.showsFilesSidebar {
                 SidebarResizeHandle(width: $filesSidebarWidth, defaultWidth: 244, edge: .trailing,
                                     range: 200...max(200, min(560, totalWidth - left - mainMinimum)))
-                WorkspaceBrowserView(location: explorerLocation,
+                VStack(spacing: 0) {
+                    filesSidebarSpaces
+                    Divider()
+                    WorkspaceBrowserView(location: explorerLocation,
                                      machine: explorerMachine,
                                      refreshVersion: window.fileRefreshVersion,
                                      onOpenFile: { location, path, preview in
@@ -376,7 +380,8 @@ private struct DestinationContentView: View {
                                      },
                                      commandTarget: window.explorer,
                                      spaces: herdr.snapshot?.workspaces ?? [])
-                    .frame(width: filesSidebarWidth)
+                }
+                .frame(width: filesSidebarWidth)
             }
         }
     }
@@ -411,45 +416,67 @@ private struct DestinationContentView: View {
         }
     }
 
+    /// The Spaces list and its New Space button; the left sidebar and the top of the right one show it.
+    private var spacesSection: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 0) {
+                sectionTitle("SPACES", icon: "square.stack")
+                Spacer()
+                Button {
+                    activeDocumentID = nil
+                    destinations.createSpace(on: herdr)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: typography.secondary, weight: .semibold))
+                        .frame(width: 23, height: typography.metric(20))
+                }
+                .buttonStyle(.plain)
+                .help("New Space")
+                .disabled(!herdr.isConnected)
+            }
+            ForEach(destinations.stores, id: \.contextID) { store in
+                HerdrDestinationSection(store: store, notifier: notifier,
+                    spaceDrag: window.spaceDrag, tabDrag: window.tabDrag,
+                    active: store === herdr, grouped: destinations.stores.count > 1,
+                    select: { destinations.select(store, workspaceID: $0) },
+                    create: { destinations.createSpace(on: store) },
+                    rename: { space in
+                        window.renameText = space.label
+                        window.renameTarget = .workspace(space.workspaceID)
+                        window.renameConnection = HerdrActionConnection(store)
+                    }, close: { space in
+                        window.closeTarget = .workspace(space.workspaceID, space.label)
+                        window.closeConnection = HerdrActionConnection(store)
+                    })
+            }
+            if let error = destinations.catalogError {
+                Text(error).font(.caption).foregroundStyle(theme.warning)
+            }
+        }
+    }
+
+    /// The Spaces list on top of the right sidebar, so Spaces stay reachable with the left sidebar
+    /// hidden. It is as tall as its rows, up to about six, and scrolls beyond that.
+    private var filesSidebarSpaces: some View {
+        ScrollView {
+            spacesSection
+                .padding(7)
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.onChange(of: proxy.size.height, initial: true) { _, height in
+                            spacesContentHeight = height
+                        }
+                    }
+                }
+        }
+        .frame(height: min(spacesContentHeight, typography.metric(210)))
+    }
+
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 13) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 0) {
-                            sectionTitle("SPACES", icon: "square.stack")
-                            Spacer()
-                            Button {
-                                activeDocumentID = nil
-                                destinations.createSpace(on: herdr)
-                            } label: {
-                                Image(systemName: "plus")
-                                    .font(.system(size: typography.secondary, weight: .semibold))
-                                    .frame(width: 23, height: typography.metric(20))
-                            }
-                            .buttonStyle(.plain)
-                            .help("New Space")
-                            .disabled(!herdr.isConnected)
-                        }
-                        ForEach(destinations.stores, id: \.contextID) { store in
-                            HerdrDestinationSection(store: store, notifier: notifier,
-                                spaceDrag: window.spaceDrag, tabDrag: window.tabDrag,
-                                active: store === herdr, grouped: destinations.stores.count > 1,
-                                select: { destinations.select(store, workspaceID: $0) },
-                                create: { destinations.createSpace(on: store) },
-                                rename: { space in
-                                    window.renameText = space.label
-                                    window.renameTarget = .workspace(space.workspaceID)
-                                    window.renameConnection = HerdrActionConnection(store)
-                                }, close: { space in
-                                    window.closeTarget = .workspace(space.workspaceID, space.label)
-                                    window.closeConnection = HerdrActionConnection(store)
-                                })
-                        }
-                        if let error = destinations.catalogError {
-                            Text(error).font(.caption).foregroundStyle(theme.warning)
-                        }
-                    }
+                    spacesSection
 
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 0) {
