@@ -684,4 +684,44 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(user?.text, "you are so cute")
         XCTAssertNotNil(user?.time)
     }
+
+    // MARK: Webcam size and zoom
+
+    func testHeightFactorAndZoomAreClamped() {
+        XCTAssertEqual(CompanionPreferences.clampedHeightFactor(0.1), 0.5)
+        XCTAssertEqual(CompanionPreferences.clampedHeightFactor(9), 1.8)
+        XCTAssertEqual(CompanionPreferences.clampedHeightFactor(1.1), 1.1)
+        XCTAssertEqual(CompanionPreferences.clampedHeightFactor(.nan), 0.75)
+        XCTAssertEqual(CompanionPreferences.clampedZoom(0.2), 1.0)
+        XCTAssertEqual(CompanionPreferences.clampedZoom(7), 2.5)
+        XCTAssertEqual(CompanionPreferences.clampedZoom(1.3), 1.3)
+        XCTAssertEqual(CompanionPreferences.clampedZoom(.infinity), 1.6)
+    }
+
+    func testHeightFactorAndZoomPersistAndDefault() throws {
+        let suite = "CompanionSizeTests-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(CompanionPreferences.heightFactor(defaults: defaults), 0.75, "unset uses the default")
+        XCTAssertEqual(CompanionPreferences.zoom(defaults: defaults), 1.6)
+        defaults.set(1.25, forKey: CompanionPreferences.heightFactorKey)
+        defaults.set(2.0, forKey: CompanionPreferences.zoomKey)
+        XCTAssertEqual(CompanionPreferences.heightFactor(defaults: defaults), 1.25)
+        XCTAssertEqual(CompanionPreferences.zoom(defaults: defaults), 2.0)
+        defaults.set(40.0, forKey: CompanionPreferences.heightFactorKey)
+        defaults.set(0.0, forKey: CompanionPreferences.zoomKey)
+        XCTAssertEqual(CompanionPreferences.heightFactor(defaults: defaults), 1.8, "stored values are clamped on read")
+        XCTAssertEqual(CompanionPreferences.zoom(defaults: defaults), 1.0)
+    }
+
+    func testZoomAnchorIsTheSpriteCenter() {
+        let size = CGSize(width: 200, height: 100)
+        let anchor = CompanionScene.zoomAnchor(spriteRect: [100, 20, 40, 60], backgroundSize: size)
+        XCTAssertEqual(anchor.x, 0.6, accuracy: 0.0001)
+        XCTAssertEqual(anchor.y, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(CompanionScene.zoomAnchor(spriteRect: nil, backgroundSize: size), .center)
+        XCTAssertEqual(CompanionScene.zoomAnchor(spriteRect: [1, 2, 3], backgroundSize: size), .center)
+        XCTAssertEqual(CompanionScene.zoomAnchor(spriteRect: [500, 500, 50, 50], backgroundSize: size).x, 1,
+                       "a rectangle outside the background stays inside the unit square")
+    }
 }

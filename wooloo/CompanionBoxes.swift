@@ -11,6 +11,38 @@ enum CompanionPreferences {
     static let jineCollapsedKey = "companionJineCollapsed"
     static let defaultActivity = "idle"
     static let skinKey = "companionSkin"
+    /// The room's height as a multiple of the sidebar's width.
+    static let heightFactorKey = "companionHeightFactor"
+    static let defaultHeightFactor = 0.75
+    static let heightFactorRange: ClosedRange<Double> = 0.5...1.8
+    /// How far the scene is magnified around her sprite.
+    static let zoomKey = "companionZoom"
+    static let defaultZoom = 1.6
+    static let zoomRange: ClosedRange<Double> = 1.0...2.5
+
+    /// `value` inside `range`; anything that is not a number gives `fallback`.
+    static func clamp(_ value: Double, to range: ClosedRange<Double>, fallback: Double) -> Double {
+        guard value.isFinite else { return fallback }
+        return min(max(value, range.lowerBound), range.upperBound)
+    }
+
+    static func clampedHeightFactor(_ value: Double) -> Double {
+        clamp(value, to: heightFactorRange, fallback: defaultHeightFactor)
+    }
+
+    static func clampedZoom(_ value: Double) -> Double {
+        clamp(value, to: zoomRange, fallback: defaultZoom)
+    }
+
+    static func heightFactor(defaults: UserDefaults = .standard) -> Double {
+        guard defaults.object(forKey: heightFactorKey) != nil else { return defaultHeightFactor }
+        return clampedHeightFactor(defaults.double(forKey: heightFactorKey))
+    }
+
+    static func zoom(defaults: UserDefaults = .standard) -> Double {
+        guard defaults.object(forKey: zoomKey) != nil else { return defaultZoom }
+        return clampedZoom(defaults.double(forKey: zoomKey))
+    }
 
     static func skinID(defaults: UserDefaults = .standard) -> String {
         defaults.string(forKey: skinKey) ?? CompanionManifest.defaultSkin
@@ -136,6 +168,8 @@ struct CompanionWebcamSettings: View {
     @ObservedObject var model: CompanionModel
     @Binding var isPresented: Bool
     @AppStorage(CompanionPreferences.skinKey) private var skin = CompanionManifest.defaultSkin
+    @AppStorage(CompanionPreferences.heightFactorKey) private var heightFactor = CompanionPreferences.defaultHeightFactor
+    @AppStorage(CompanionPreferences.zoomKey) private var zoom = CompanionPreferences.defaultZoom
     @Environment(\.woolooTypography) private var typography
 
     var body: some View {
@@ -179,11 +213,25 @@ struct CompanionWebcamSettings: View {
                             .help(choice.label)
                         }
                     }
+                    sliderRow("Size", value: $heightFactor, range: CompanionPreferences.heightFactorRange)
+                    sliderRow("Zoom", value: $zoom, range: CompanionPreferences.zoomRange)
                 }
             }
         }
         .frame(width: 250)
         .padding(4)
+    }
+}
+
+extension CompanionWebcamSettings {
+    fileprivate func sliderRow(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(CompanionFont.font(model.fontName, size: typography.secondary))
+                .foregroundStyle(CompanionPalette.indigo)
+                .frame(width: 38, alignment: .leading)
+            Slider(value: value, in: range)
+        }
     }
 }
 

@@ -862,7 +862,10 @@ struct CompanionView: View {
     let width: CGFloat
     @AppStorage(CompanionPreferences.activityKey) private var activityID = CompanionPreferences.defaultActivity
     @AppStorage(CompanionPreferences.skinKey) private var skin = CompanionManifest.defaultSkin
+    @AppStorage(CompanionPreferences.heightFactorKey) private var heightFactor = CompanionPreferences.defaultHeightFactor
+    @AppStorage(CompanionPreferences.zoomKey) private var zoom = CompanionPreferences.defaultZoom
     @State private var showsSettings = false
+    @State private var dragStartFactor: Double?
 
     var body: some View {
         let mood = CompanionMood(agentStatus: commander?.agentStatus)
@@ -870,7 +873,8 @@ struct CompanionView: View {
             VStack(spacing: 6) {
                 CompanionScene(background: model.backgroundImage(at: context.date),
                                spriteRect: model.manifest?.spriteRect,
-                               sprite: model.image(at: context.date))
+                               sprite: model.image(at: context.date),
+                               zoom: CompanionPreferences.clampedZoom(zoom))
                 if let text = model.player.bubbleText(dialogue: model.dialogue,
                                                       title: commander?.terminalTitleStripped) {
                     CompanionBubble(text: text)
@@ -885,7 +889,23 @@ struct CompanionView: View {
             .onChange(of: skin) { _, skin in model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus) }
             .onAppear { model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus) }
         }
-        .frame(height: width * 0.75)
+        .frame(height: width * CompanionPreferences.clampedHeightFactor(heightFactor))
+        .overlay(alignment: .bottom) {
+            // A thin grab strip along the bottom edge; dragging down makes the room taller.
+            ResizeHandleArea(
+                vertical: true,
+                tooltip: "Drag to resize the webcam · double-click to reset",
+                onDrag: { translation in
+                    guard width > 0 else { return }
+                    let start = dragStartFactor ?? CompanionPreferences.clampedHeightFactor(heightFactor)
+                    dragStartFactor = start
+                    heightFactor = CompanionPreferences.clampedHeightFactor(start + translation / width)
+                },
+                onDragEnd: { dragStartFactor = nil },
+                onReset: { heightFactor = CompanionPreferences.defaultHeightFactor }
+            )
+            .frame(height: 7)
+        }
         .overlay(alignment: .topTrailing) {
             if model.manifest?.skins.isEmpty == false {
                 CompanionGearButton(isPresented: $showsSettings) {
@@ -899,10 +919,22 @@ struct CompanionView: View {
 
 /// Her sprite, alone or in front of a background that is fitted into the area; the sprite is
 /// fitted into `spriteRect`, given in background pixels, at the background's scale.
-private struct CompanionScene: View {
+struct CompanionScene: View {
     let background: CGImage?
     let spriteRect: [Double]?
     let sprite: CGImage?
+    /// The whole scene is magnified by this much around her sprite's center.
+    var zoom: Double = 1
+
+    /// Where the sprite's center is within a background of `size`, as a unit point, for the
+    /// zoom to scale around. The middle when there is no usable rectangle.
+    static func zoomAnchor(spriteRect: [Double]?, backgroundSize size: CGSize) -> UnitPoint {
+        guard let rect = spriteRect, rect.count == 4, size.width > 0, size.height > 0,
+              rect.allSatisfy(\.isFinite) else { return .center }
+        let x = (rect[0] + rect[2] / 2) / size.width
+        let y = (rect[1] + rect[3] / 2) / size.height
+        return UnitPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+    }
 
     /// The scale that fits `content` into `area` without cropping.
     static func fitScale(content: CGSize, in area: CGSize) -> CGFloat {
@@ -930,14 +962,17 @@ private struct CompanionScene: View {
                     }
                 }
                 .frame(width: size.width * scale, height: size.height * scale)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .scaleEffect(zoom, anchor: Self.zoomAnchor(spriteRect: rect, backgroundSize: size))
                 .frame(width: area.size.width, height: area.size.height)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             } else if let sprite {
                 Image(decorative: sprite, scale: 1)
                     .interpolation(.none)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: area.size.width, height: area.size.height)
+                    .scaleEffect(zoom)
+                    .clipped()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
