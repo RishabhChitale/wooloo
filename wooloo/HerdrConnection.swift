@@ -1773,6 +1773,16 @@ final class HerdrStore: ObservableObject {
         }
     }
 
+    /// Herdr's `agent.prompt`: types a message into an agent's pane and submits it.
+    func sendAgentPrompt(_ params: [String: String]) async throws {
+        guard isConnected else { throw HerdrSocketError.message("Herdr is not connected") }
+        let path = socketPath
+        let reaching = BlockingWorkMachine(machine)
+        try await BlockingWork.run(priority: .userInitiated, reaching: reaching) {
+            _ = try HerdrSocket.request(path: path, method: "agent.prompt", params: params)
+        }
+    }
+
     private func performAction(method: String, params: [String: Any], followServerFocus: Bool) {
         guard isConnected else { return }
         let path = socketPath

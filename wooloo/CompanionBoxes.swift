@@ -146,9 +146,164 @@ struct CompanionActivitiesBox: View {
     }
 }
 
+/// The commander's last messages, her face and stickers, and a field to write to the commander.
+/// Sending goes to the commander agent of the selected Space through Herdr.
+struct CompanionJineBox: View {
+    @ObservedObject var model: CompanionModel
+    let commander: HerdrAgent?
+    let store: HerdrStore
+    @AppStorage(CompanionPreferences.jineCollapsedKey) private var collapsed = false
+    @State private var draft = ""
+    @State private var sending = false
+    @Environment(\.woolooTypography) private var typography
+
+    private var canSend: Bool { commander != nil && store.isConnected && !sending }
+
+    var body: some View {
+        if let manifest = model.manifest {
+            CompanionBox(title: "JINE", fontName: model.fontName, collapsed: $collapsed) {
+                VStack(spacing: 6) {
+                    messagePanel
+                    HStack(spacing: 6) {
+                        face(manifest)
+                        stickerStrip(manifest.stickers)
+                    }
+                    composer
+                    if let error = model.sendError {
+                        Text(error)
+                            .font(.system(size: typography.caption))
+                            .foregroundStyle(.red)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+    }
+
+    private var messagePanel: some View {
+        VStack(spacing: 2) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 4) {
+                        ForEach(Array(model.messages.enumerated()), id: \.offset) { index, message in
+                            bubble(message).id(index)
+                        }
+                    }
+                    .padding(4)
+                }
+                .onChange(of: model.messages) { _, messages in
+                    if !messages.isEmpty { proxy.scrollTo(messages.count - 1, anchor: .bottom) }
+                }
+                .onAppear {
+                    if !model.messages.isEmpty { proxy.scrollTo(model.messages.count - 1, anchor: .bottom) }
+                }
+            }
+            .frame(height: 118)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(CompanionMessage.lastSent(model.messages.last?.time, now: context.date) ?? " ")
+                    .font(.system(size: typography.caption))
+                    .foregroundStyle(CompanionPalette.indigo.opacity(0.7))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.horizontal, 5)
+            }
+        }
+        .background(CompanionPalette.messages, in: RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func bubble(_ message: CompanionMessage) -> some View {
+        let mine = message.role == .user
+        return HStack(spacing: 0) {
+            if mine { Spacer(minLength: 24) }
+            Text(message.displayText)
+                .font(CompanionFont.font(model.fontName, size: typography.caption))
+                .foregroundStyle(Color(red: 0.2, green: 0.15, blue: 0.3))
+                .multilineTextAlignment(mine ? .trailing : .leading)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(mine ? Color.white : CompanionPalette.titleBar, in: RoundedRectangle(cornerRadius: 7))
+            if !mine { Spacer(minLength: 24) }
+        }
+    }
+
+    private func face(_ manifest: CompanionManifest) -> some View {
+        let path = manifest.activity(id: "idle")?.icon ?? "activities/idle.png"
+        return Group {
+            if let image = model.image(forPath: path) {
+                Image(decorative: image, scale: 1).interpolation(.none).resizable().aspectRatio(contentMode: .fit)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(width: 34, height: 34)
+    }
+
+    private func stickerStrip(_ stickers: [CompanionSticker]) -> some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 4) {
+                ForEach(stickers) { sticker in
+                    Button { submit(sticker.label, clearsDraft: false) } label: {
+                        Group {
+                            if let image = model.image(forPath: sticker.image) {
+                                Image(decorative: image, scale: 1).interpolation(.none).resizable()
+                                    .aspectRatio(contentMode: .fit)
+                            } else {
+                                Text(sticker.label).font(.system(size: typography.caption))
+                            }
+                        }
+                        .frame(height: 34)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSend)
+                    .opacity(canSend ? 1 : 0.5)
+                    .help("Send “\(sticker.label)”")
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+        .frame(height: 34)
+    }
+
+    private var composer: some View {
+        HStack(spacing: 4) {
+            TextField("Message Ame-chan…", text: $draft)
+                .textFieldStyle(.plain)
+                .font(.system(size: typography.secondary))
+                .padding(.horizontal, 6)
+                .frame(height: typography.metric(22))
+                .background(Color.white)
+                .overlay(Rectangle().strokeBorder(CompanionPalette.indigo, lineWidth: 1))
+                .onSubmit { submit(draft, clearsDraft: true) }
+            Button { submit(draft, clearsDraft: true) } label: {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: typography.secondary))
+                    .foregroundStyle(CompanionPalette.indigo)
+                    .frame(width: 24, height: typography.metric(22))
+                    .background(CompanionPalette.highlight, in: RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .help(commander == nil ? "No commander in this Space" : "Send to the commander")
+        }
+        .opacity(canSend ? 1 : 0.6)
+    }
+
+    /// Only Enter, the send button or a sticker send; losing focus never does.
+    private func submit(_ text: String, clearsDraft: Bool) {
+        guard canSend, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        sending = true
+        Task {
+            let sent = await model.send(text, to: commander, via: store)
+            sending = false
+            if sent, clearsDraft, draft == text { draft = "" }
+        }
+    }
+}
+
 /// Her room, and the boxes under it, in a scroll view when they are taller than `maxHeight`.
 /// Draws nothing when there is no manifest.
 struct CompanionPanel: View {
+    let store: HerdrStore
     let agents: [HerdrAgent]
     let workspaceID: String?
     /// The sidebar's width.
@@ -166,6 +321,7 @@ struct CompanionPanel: View {
                     VStack(spacing: 6) {
                         CompanionView(model: model, commander: commander, width: width - 14)
                         CompanionActivitiesBox(model: model)
+                        CompanionJineBox(model: model, commander: commander, store: store)
                     }
                     .padding(7)
                     .background {

@@ -340,7 +340,7 @@ private struct DestinationContentView: View {
                 SidebarResizeHandle(width: $filesSidebarWidth, defaultWidth: 244, edge: .trailing,
                                     range: 200...max(200, min(560, totalWidth - left - mainMinimum)))
                 VStack(spacing: 0) {
-                    CompanionPanel(agents: herdr.snapshot?.agents ?? [], workspaceID: herdr.selectedWorkspaceID,
+                    CompanionPanel(store: herdr, agents: herdr.snapshot?.agents ?? [], workspaceID: herdr.selectedWorkspaceID,
                                    width: filesSidebarWidth, maxHeight: rightSidebarHeight * 0.65)
                     filesSidebarSpaces
                     HStack {

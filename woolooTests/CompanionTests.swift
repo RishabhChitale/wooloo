@@ -351,4 +351,83 @@ final class CompanionTests: XCTestCase {
         XCTAssertFalse(CompanionPreferences.isCollapsed(CompanionPreferences.jineCollapsedKey, defaults: defaults))
         XCTAssertEqual(defaults.string(forKey: "companionActivity"), "game", "the key the view reads")
     }
+
+    // MARK: JINE
+
+    private func rawRecord(_ object: [String: Any]) -> String {
+        String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    }
+
+    func testMessagesKeepTypedUserTextAndAssistantText() {
+        let lines = [
+            rawRecord(["type": "user", "timestamp": "2026-11-07T10:00:00.000Z",
+                       "message": ["content": "first typed"]]),
+            rawRecord(["type": "assistant", "timestamp": "2026-11-07T10:00:05.500Z",
+                       "message": ["content": [["type": "text", "text": "**Sure.** On it."], ["type": "tool_use", "name": "Bash"]]]]),
+            rawRecord(["type": "user", "message": ["content": [["type": "tool_result", "content": "output"]]]]),
+            rawRecord(["type": "user", "isMeta": true, "message": ["content": "meta text"]]),
+            rawRecord(["type": "user", "message": ["content": "<system-reminder>hidden</system-reminder>"]]),
+            rawRecord(["type": "user", "isSidechain": true, "message": ["content": "sub-agent prompt"]]),
+            rawRecord(["type": "system", "message": ["content": "system text"]]),
+            rawRecord(["type": "assistant", "message": ["content": [["type": "tool_use", "name": "Read"]]]]),
+            rawRecord(["type": "user", "message": ["content": [["type": "text", "text": "second typed"]]]]),
+            "garbage",
+        ]
+        let messages = CompanionDialogue.messages(inTail: Data(lines.joined(separator: "\n").utf8), startsMidFile: false)
+        XCTAssertEqual(messages.map(\.role), [.user, .assistant, .user])
+        XCTAssertEqual(messages.map(\.text), ["first typed", "**Sure.** On it.", "second typed"])
+        XCTAssertEqual(messages[1].displayText, "Sure. On it.")
+        XCTAssertNotNil(messages[0].time)
+        XCTAssertEqual(try XCTUnwrap(messages[1].time).timeIntervalSince(try XCTUnwrap(messages[0].time)), 5.5, accuracy: 0.01)
+        XCTAssertNil(messages[2].time)
+    }
+
+    func testOnlyTheLastFourMessagesAndNoPartialFirstLine() {
+        var lines = ["{\"partial\":"]
+        for index in 1...6 { lines.append(rawRecord(["type": "user", "message": ["content": "m\(index)"]])) }
+        let data = Data(lines.joined(separator: "\n").utf8)
+        XCTAssertEqual(CompanionDialogue.messages(inTail: data, startsMidFile: true).map(\.text), ["m3", "m4", "m5", "m6"])
+        XCTAssertEqual(CompanionDialogue.messages(inTail: data, startsMidFile: true, limit: 2).map(\.text), ["m5", "m6"])
+        XCTAssertEqual(CompanionDialogue.messages(inTail: Data("no newline".utf8), startsMidFile: true), [])
+    }
+
+    func testMessageBubblesAreCapped() {
+        let long = CompanionMessage(role: .assistant, text: String(repeating: "x", count: 500), time: nil)
+        XCTAssertEqual(long.displayText.count, CompanionMessage.maximumDisplayLength)
+        XCTAssertTrue(long.displayText.hasSuffix("…"))
+    }
+
+    func testLastSentLabel() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        XCTAssertEqual(CompanionMessage.lastSent(now.addingTimeInterval(-5), now: now), "last sent 5s ago")
+        XCTAssertEqual(CompanionMessage.lastSent(now.addingTimeInterval(-125), now: now), "last sent 2m ago")
+        XCTAssertEqual(CompanionMessage.lastSent(now.addingTimeInterval(-7300), now: now), "last sent 2h ago")
+        XCTAssertEqual(CompanionMessage.lastSent(now.addingTimeInterval(-90_000), now: now), "last sent 1d ago")
+        XCTAssertEqual(CompanionMessage.lastSent(now.addingTimeInterval(5), now: now), "last sent 0s ago")
+        XCTAssertNil(CompanionMessage.lastSent(nil, now: now))
+    }
+
+    func testPromptPayloadForTextAndStickers() throws {
+        XCTAssertEqual(CompanionMessage.promptParams(paneID: "w1:p1", text: "  hello there \n"),
+                       ["target": "w1:p1", "text": "hello there"])
+        XCTAssertEqual(CompanionMessage.promptParams(paneID: "w1:p1", text: try activityManifest().stickers[0].label),
+                       ["target": "w1:p1", "text": "OK"], "a sticker sends its label")
+        XCTAssertNil(CompanionMessage.promptParams(paneID: "w1:p1", text: "  \n "))
+        XCTAssertNil(CompanionMessage.promptParams(paneID: "", text: "hi"))
+        let huge = CompanionMessage.promptParams(paneID: "p", text: String(repeating: "a", count: 9000))
+        XCTAssertEqual(huge?["text"]?.count, CompanionMessage.maximumSendLength)
+    }
+
+    func testReaderSnapshotHasTheMessages() async throws {
+        let root = URL(fileURLWithPath: "/private/tmp/wooloo-tests/companion-\(UUID().uuidString)")
+        let project = root.appendingPathComponent("-p")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let text = rawRecord(["type": "user", "message": ["content": "hi"]]) + "\n"
+            + rawRecord(["type": "assistant", "message": ["content": [["type": "text", "text": "Hello."]]]]) + "\n"
+        try text.write(to: project.appendingPathComponent("s-1.jsonl"), atomically: true, encoding: .utf8)
+        let snapshot = await CompanionTranscriptReader(projects: root).snapshot(sessionID: "s-1")
+        XCTAssertEqual(snapshot.text, "Hello.")
+        XCTAssertEqual(snapshot.messages.map(\.text), ["hi", "Hello."])
+    }
 }

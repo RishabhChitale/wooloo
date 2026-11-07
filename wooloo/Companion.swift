@@ -244,6 +244,49 @@ struct CompanionPlayer {
     }
 }
 
+/// One turn of the commander's conversation, as the JINE box shows it.
+struct CompanionMessage: Equatable, Sendable {
+    enum Role: Equatable, Sendable { case user, assistant }
+    let role: Role
+    let text: String
+    let time: Date?
+
+    static let maximumDisplayLength = 200
+    static let maximumSendLength = 4000
+
+    /// Markdown stripped, lines joined, capped for a bubble.
+    var displayText: String {
+        let flat = CompanionDialogue.stripMarkdown(text).replacingOccurrences(of: "\n", with: " ")
+        guard flat.count > Self.maximumDisplayLength else { return flat }
+        return String(flat.prefix(Self.maximumDisplayLength - 1)).trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    /// "last sent 5s ago", "…3m ago", "…2h ago", "…1d ago".
+    static func lastSent(_ time: Date?, now: Date) -> String? {
+        guard let time else { return nil }
+        let seconds = max(0, Int(now.timeIntervalSince(time)))
+        switch seconds {
+        case ..<60: return "last sent \(seconds)s ago"
+        case ..<3600: return "last sent \(seconds / 60)m ago"
+        case ..<86_400: return "last sent \(seconds / 3600)h ago"
+        default: return "last sent \(seconds / 86_400)d ago"
+        }
+    }
+
+    /// The parameters of Herdr's `agent.prompt` (what `herdr agent prompt` sends) for a message to
+    /// the agent in a pane; nil when there is nothing to send.
+    static func promptParams(paneID: String, text: String) -> [String: String]? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !paneID.isEmpty else { return nil }
+        return ["target": paneID, "text": String(trimmed.prefix(maximumSendLength))]
+    }
+}
+
+/// What the transcript's tail holds: the newest assistant text, and the last few messages.
+struct CompanionTranscriptSnapshot: Equatable, Sendable {
+    var text: String?
+    var messages: [CompanionMessage] = []
+}
 /// What the commander says, taken from the text parts of its newest Claude Code reply. Only those
 /// parts are read; the text is never logged or stored.
 enum CompanionDialogue {
@@ -274,6 +317,44 @@ enum CompanionDialogue {
             if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return text }
         }
         return nil
+    }
+
+    /// The last `limit` messages of the conversation in a transcript's tail, oldest first: text the
+    /// user typed (not tool results, meta or system records, nor anything starting with "<") and
+    /// the text parts of assistant replies. Side-chain records (sub-agents) are left out.
+    static func messages(inTail data: Data, startsMidFile: Bool, limit: Int = 4) -> [CompanionMessage] {
+        var body = data[...]
+        if startsMidFile {
+            guard let newline = body.firstIndex(of: 0x0A) else { return [] }
+            body = body[body.index(after: newline)...]
+        }
+        var result: [CompanionMessage] = []
+        for line in body.split(separator: 0x0A, omittingEmptySubsequences: true) {
+            guard let record = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  let type = record["type"] as? String, type == "user" || type == "assistant",
+                  record["isMeta"] as? Bool != true, record["isSidechain"] as? Bool != true,
+                  let message = record["message"] as? [String: Any] else { continue }
+            var parts: [String] = []
+            if let text = message["content"] as? String {
+                parts.append(text)
+            } else if let content = message["content"] as? [[String: Any]] {
+                if type == "user", content.contains(where: { $0["type"] as? String == "tool_result" }) { continue }
+                for part in content where part["type"] as? String == "text" {
+                    if let text = part["text"] as? String { parts.append(text) }
+                }
+            }
+            let text = parts.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty || (type == "user" && text.hasPrefix("<")) { continue }
+            result.append(CompanionMessage(role: type == "user" ? .user : .assistant, text: text,
+                                           time: (record["timestamp"] as? String).flatMap(parseTime)))
+        }
+        return Array(result.suffix(limit))
+    }
+
+    private static func parseTime(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
     }
 
     /// Plain text lines: fenced code blocks dropped; headings, quotes, list bullets, emphasis and
@@ -350,7 +431,7 @@ actor CompanionTranscriptReader {
         var checked: Date?
         var size: Int?
         var modified: Date?
-        var text: String?
+        var snapshot = CompanionTranscriptSnapshot()
     }
 
     private var entries: [String: Entry] = [:]
@@ -366,24 +447,29 @@ actor CompanionTranscriptReader {
     }
 
     func latestText(sessionID: String, now: Date = Date()) -> String? {
-        guard Self.isSessionID(sessionID) else { return nil }
+        snapshot(sessionID: sessionID, now: now).text
+    }
+
+    func snapshot(sessionID: String, now: Date = Date()) -> CompanionTranscriptSnapshot {
+        guard Self.isSessionID(sessionID) else { return CompanionTranscriptSnapshot() }
         var entry = entries[sessionID] ?? Entry()
         defer { entries[sessionID] = entry }
-        if let checked = entry.checked, now.timeIntervalSince(checked) < Self.minimumInterval { return entry.text }
+        if let checked = entry.checked, now.timeIntervalSince(checked) < Self.minimumInterval { return entry.snapshot }
         entry.checked = now
         if entry.url == nil { entry.url = locate(sessionID) }
-        guard let url = entry.url else { return nil }
+        guard let url = entry.url else { return entry.snapshot }
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = (attributes[.size] as? NSNumber)?.intValue else {
             entry.url = nil
-            return nil
+            entry.snapshot = CompanionTranscriptSnapshot()
+            return entry.snapshot
         }
         let modified = attributes[.modificationDate] as? Date
-        if size == entry.size, modified == entry.modified { return entry.text }
+        if size == entry.size, modified == entry.modified { return entry.snapshot }
         entry.size = size
         entry.modified = modified
-        entry.text = Self.readTail(of: url, size: size)
-        return entry.text
+        entry.snapshot = Self.readTail(of: url, size: size)
+        return entry.snapshot
     }
 
     private func locate(_ sessionID: String) -> URL? {
@@ -393,13 +479,15 @@ actor CompanionTranscriptReader {
             .first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
-    private static func readTail(of url: URL, size: Int) -> String? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+    private static func readTail(of url: URL, size: Int) -> CompanionTranscriptSnapshot {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return CompanionTranscriptSnapshot() }
         defer { try? handle.close() }
         let offset = max(0, size - tailBytes)
         guard (try? handle.seek(toOffset: UInt64(offset))) != nil,
-              let data = try? handle.readToEnd() else { return nil }
-        return CompanionDialogue.latestAssistantText(inTail: data, startsMidFile: offset > 0)
+              let data = try? handle.readToEnd() else { return CompanionTranscriptSnapshot() }
+        return CompanionTranscriptSnapshot(
+            text: CompanionDialogue.latestAssistantText(inTail: data, startsMidFile: offset > 0),
+            messages: CompanionDialogue.messages(inTail: data, startsMidFile: offset > 0))
     }
 }
 /// Decoded frames, which `CompanionModel` keeps for the sequences it has played.
@@ -413,6 +501,8 @@ final class CompanionModel: ObservableObject {
     @Published private(set) var player = CompanionPlayer()
     @Published private(set) var loaded: [String: CompanionFrames] = [:]
     @Published private(set) var sentences: [String] = []
+    @Published private(set) var messages: [CompanionMessage] = []
+    @Published private(set) var sendError: String?
     /// Single images of the companion folder (scene, activity icons, stickers), by relative path.
     @Published private(set) var images: [String: CGImage] = [:]
     /// The registered skin font, if the manifest has one.
@@ -466,6 +556,7 @@ final class CompanionModel: ObservableObject {
             dialogueSession = sessionID
             dialogueRequested = .distantPast
             if !sentences.isEmpty { sentences = [] }
+            if !messages.isEmpty { messages = [] }
         }
         guard let sessionID, !dialogueInFlight,
               now.timeIntervalSince(dialogueRequested) >= CompanionTranscriptReader.minimumInterval else { return }
@@ -473,11 +564,27 @@ final class CompanionModel: ObservableObject {
         dialogueInFlight = true
         let reader = reader
         Task {
-            let text = await reader.latestText(sessionID: sessionID)
+            let snapshot = await reader.snapshot(sessionID: sessionID)
             self.dialogueInFlight = false
             guard self.dialogueSession == sessionID else { return }
-            let next = text.map { CompanionDialogue.sentences(fromMarkdown: $0) } ?? []
+            let next = snapshot.text.map { CompanionDialogue.sentences(fromMarkdown: $0) } ?? []
             if next != self.sentences { self.sentences = next }
+            if snapshot.messages != self.messages { self.messages = snapshot.messages }
+        }
+    }
+
+    /// Sends a message to the commander through Herdr; false when it cannot be sent. The text is
+    /// never logged or kept.
+    func send(_ text: String, to commander: HerdrAgent?, via store: HerdrStore) async -> Bool {
+        guard let commander, store.isConnected,
+              let params = CompanionMessage.promptParams(paneID: commander.paneID, text: text) else { return false }
+        do {
+            try await store.sendAgentPrompt(params)
+            sendError = nil
+            return true
+        } catch {
+            sendError = "Not sent: \(error.localizedDescription)"
+            return false
         }
     }
 
