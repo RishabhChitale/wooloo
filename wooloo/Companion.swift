@@ -234,7 +234,8 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
     }
 
     func sequences(for mood: CompanionMood) -> [CompanionSequence] { sequences(forKey: mood.rawValue) }
-    func lines(for mood: CompanionMood) -> [String] { (lines[mood.rawValue] ?? []).filter { !$0.isEmpty } }
+    func lines(for mood: CompanionMood) -> [String] { lines(forKey: mood.rawValue) }
+    func lines(forKey key: String) -> [String] { (lines[key] ?? []).filter { !$0.isEmpty } }
 }
 
 /// Which sequence and speech line show now. Pure, so rotation is testable: `pick` returns an index
@@ -248,13 +249,14 @@ struct CompanionPlayer {
     private(set) var sequence: CompanionSequence?
     private(set) var sequenceStart = Date.distantPast
     private(set) var line: String?
+    private var playingLineKey: String?
     private var lineStart = Date.distantPast
 
     /// Moves to a new sequence or line when the mood changed, a one-shot sequence ended, a loop
     /// has played long enough, or a line has been up long enough. Returns whether anything changed.
     @discardableResult
     mutating func advance(now: Date, mood newMood: CompanionMood, manifest: CompanionManifest,
-                          sequenceKey: String? = nil, skin: String? = nil,
+                          sequenceKey: String? = nil, skin: String? = nil, lineKey: String? = nil,
                           pick: (Int) -> Int = { Int.random(in: 0..<$0) }) -> Bool {
         var changed = false
         let moodChanged = mood != newMood
@@ -273,8 +275,11 @@ struct CompanionPlayer {
             sequence = next
             sequenceStart = now
         }
-        if moodChanged || line == nil || now.timeIntervalSince(lineStart) >= Self.lineRotation {
-            let lines = manifest.lines(for: newMood)
+        let linesKey = lineKey ?? newMood.rawValue
+        if moodChanged || playingLineKey != linesKey || line == nil
+            || now.timeIntervalSince(lineStart) >= Self.lineRotation {
+            playingLineKey = linesKey
+            let lines = manifest.lines(forKey: linesKey)
             let others = lines.filter { $0 != line }
             let pool = others.isEmpty ? lines : others
             line = pool.isEmpty ? nil : pool[pick(pool.count)]
@@ -304,9 +309,9 @@ struct CompanionPlayer {
     }
 }
 
-/// Feelings that override the base mood, strongest first: scared, crying, sad, angry, stressed.
+/// Feelings that override the base mood, strongest first: scared, love, crying, sad, angry, stressed.
 enum CompanionEmotion: String, CaseIterable, Sendable {
-    case scared, crying, sad, angry, stressed
+    case scared, love, crying, sad, angry, stressed
 }
 
 /// Which emotion words the commander's newest text holds. Words match whole, in lower case.
@@ -331,6 +336,37 @@ struct CompanionTextSignals: Equatable, Sendable {
     }
 }
 
+/// Signs of affection in what the user typed: love, cute, thanks, hearts…
+enum CompanionAffection {
+    static let words: Set<String> = ["love", "cute", "thanks", "ily"]
+    static let phrases = ["thank you", "good job", "good girl"]
+    static let duration: TimeInterval = 5 * 60
+
+    /// `extra` are more phrases, such as the label of the LOVE sticker. Words and phrases match whole.
+    static func matches(_ text: String?, extra: [String] = []) -> Bool {
+        guard let text else { return false }
+        let lowered = text.lowercased().replacingOccurrences(of: "’", with: "'")
+        if lowered.contains("<3") || lowered.unicodeScalars.contains(where: isHeart) { return true }
+        let tokens = lowered.split(whereSeparator: { !($0.isLetter || $0.isNumber || $0 == "'") }).map(String.init)
+        if !words.isDisjoint(with: tokens) { return true }
+        let padded = " " + tokens.joined(separator: " ") + " "
+        return (phrases + extra.map { $0.lowercased() }).contains { phrase in
+            let parts = phrase.split(whereSeparator: { !($0.isLetter || $0.isNumber || $0 == "'") })
+            return !parts.isEmpty && padded.contains(" " + parts.joined(separator: " ") + " ")
+        }
+    }
+
+    /// ♥ ♡ ❤ ❣ and the heart emoji (not the broken heart).
+    private static func isHeart(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x2665, 0x2661, 0x2763, 0x2764, 0x1F493, 0x1F495...0x1F49F, 0x1F5A4, 0x1F90D, 0x1F90E, 0x1F9E1,
+             0x1FA75...0x1FA77:
+            return true
+        default:
+            return false
+        }
+    }
+}
 /// How long the commander has had the same status, restarted whenever the status changes.
 struct CompanionStatusTimer: Equatable, Sendable {
     private(set) var status: String?
@@ -353,9 +389,10 @@ enum CompanionEmotionRules {
     /// The strongest emotion that applies, or nil for the base mood. `textTime` is when the newest
     /// assistant text was written; without it a text counts as too old for the failure rules.
     static func resolve(mood: CompanionMood, signals: CompanionTextSignals, textTime: Date?,
-                        statusElapsed: TimeInterval, now: Date) -> CompanionEmotion? {
+                        statusElapsed: TimeInterval, now: Date, loveTime: Date? = nil) -> CompanionEmotion? {
         let fresh = textTime.map { now.timeIntervalSince($0) <= messageWindow } ?? false
         if mood == .working, signals.scary { return .scared }
+        if let loveTime, now.timeIntervalSince(loveTime) <= CompanionAffection.duration { return .love }
         if signals.failure, signals.sorry, fresh { return .crying }
         if signals.failure, fresh { return .sad }
         if mood == .waiting, statusElapsed > angryAfter { return .angry }
@@ -405,6 +442,9 @@ struct CompanionMessage: Equatable, Sendable {
 struct CompanionTranscriptSnapshot: Equatable, Sendable {
     var text: String?
     var textTime: Date?
+    /// The newest user message that was typed, for the affection rule; not kept beyond the model.
+    var userText: String?
+    var userTime: Date?
     var messages: [CompanionMessage] = []
 }
 /// What the commander says, taken from the text parts of its newest Claude Code reply. Only those
@@ -534,7 +574,7 @@ enum CompanionDialogue {
     static func pick(mood: CompanionMood, emotion: CompanionEmotion? = nil, sentences: [String]) -> String? {
         let sentence: String?
         switch emotion {
-        case .sad, .crying: return sentences.first.map(cap)
+        case .sad, .crying, .love: return sentences.first.map(cap)
         case .scared, .stressed: return sentences.last.map(cap)
         case .angry, nil: break
         }
@@ -618,8 +658,11 @@ actor CompanionTranscriptReader {
         guard (try? handle.seek(toOffset: UInt64(offset))) != nil,
               let data = try? handle.readToEnd() else { return CompanionTranscriptSnapshot() }
         let latest = CompanionDialogue.latestAssistant(inTail: data, startsMidFile: offset > 0)
+        let newestUser = CompanionDialogue.messages(inTail: data, startsMidFile: offset > 0, limit: Int.max)
+            .last(where: { $0.role == .user })
         return CompanionTranscriptSnapshot(
             text: latest?.text, textTime: latest?.time,
+            userText: newestUser?.text, userTime: newestUser?.time,
             messages: CompanionDialogue.messages(inTail: data, startsMidFile: offset > 0))
     }
 }
@@ -640,6 +683,7 @@ final class CompanionModel: ObservableObject {
     @Published private(set) var emotion: CompanionEmotion?
     private var signals = CompanionTextSignals()
     private var textTime: Date?
+    private var loveTime: Date?
     private var statusTimer = CompanionStatusTimer()
     /// Single images of the companion folder (scene, activity icons, stickers), by relative path.
     @Published private(set) var images: [String: CGImage] = [:]
@@ -693,11 +737,14 @@ final class CompanionModel: ObservableObject {
         }
         statusTimer.observe(status ?? mood.rawValue, now: now)
         let candidate = CompanionEmotionRules.resolve(mood: mood, signals: signals, textTime: textTime,
-                                                      statusElapsed: statusTimer.elapsed(now: now), now: now)
+                                                      statusElapsed: statusTimer.elapsed(now: now), now: now,
+                                                      loveTime: loveTime)
         let applied = candidate.flatMap { manifest.hasOwnSequences(forKey: $0.rawValue, skin: skin) ? $0 : nil }
         if applied != emotion { emotion = applied }
+        let lineKey = applied == .love && !manifest.lines(forKey: "love").isEmpty ? "love" : nil
         let key = applied?.rawValue ?? manifest.sequenceKey(mood: mood, activityID: activityID, skin: skin)
-        if next.advance(now: now, mood: mood, manifest: manifest, sequenceKey: key, skin: skin) { player = next }
+        if next.advance(now: now, mood: mood, manifest: manifest, sequenceKey: key, skin: skin,
+                        lineKey: lineKey) { player = next }
         if let sequence = next.sequence { ensureLoaded(sequence) }
         if let path = manifest.backgroundPath(at: now) { ensureImage(path) }
     }
@@ -716,6 +763,7 @@ final class CompanionModel: ObservableObject {
             if !messages.isEmpty { messages = [] }
             signals = CompanionTextSignals()
             textTime = nil
+            loveTime = nil
         }
         guard let sessionID, !dialogueInFlight,
               now.timeIntervalSince(dialogueRequested) >= CompanionTranscriptReader.minimumInterval else { return }
@@ -731,6 +779,8 @@ final class CompanionModel: ObservableObject {
             if snapshot.messages != self.messages { self.messages = snapshot.messages }
             self.signals = CompanionTextSignals(text: snapshot.text)
             self.textTime = snapshot.textTime
+            let loveLabels = (self.manifest?.stickers ?? []).filter { $0.id == "love" }.map(\.label)
+            self.loveTime = CompanionAffection.matches(snapshot.userText, extra: loveLabels) ? snapshot.userTime : nil
         }
     }
 

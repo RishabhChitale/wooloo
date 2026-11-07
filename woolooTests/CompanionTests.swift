@@ -614,4 +614,73 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(latest.text, "Newest.")
         XCTAssertNotNil(latest.time)
     }
+
+    // MARK: Love
+
+    func testAffectionSignals() {
+        for text in ["I love this", "so CUTE", "Thank you!", "thanks", "good job", "Good girl", "ily", "xoxo <3",
+                     "nice ♥", "great ❤️", "wow 💖", "💜", "send LOVE"] {
+            XCTAssertTrue(CompanionAffection.matches(text), text)
+        }
+        for text in ["glove box", "acute pain", "thankful", "good morning", "ilya", "💔", "", "run the tests"] {
+            XCTAssertFalse(CompanionAffection.matches(text), text)
+        }
+        XCTAssertFalse(CompanionAffection.matches(nil))
+        XCTAssertTrue(CompanionAffection.matches("Aww, Daisuki!", extra: ["DAISUKI"]), "the sticker label")
+        XCTAssertFalse(CompanionAffection.matches("Aww", extra: ["Daisuki"]))
+    }
+
+    private func loveEmotion(_ mood: CompanionMood, text: String? = nil, loveAge: TimeInterval? = 30,
+                             elapsed: TimeInterval = 0) -> CompanionEmotion? {
+        CompanionEmotionRules.resolve(mood: mood, signals: CompanionTextSignals(text: text),
+                                      textTime: now.addingTimeInterval(-60), statusElapsed: elapsed, now: now,
+                                      loveTime: loveAge.map { now.addingTimeInterval(-$0) })
+    }
+
+    func testLoveLastsFiveMinutesFromTheMessage() {
+        XCTAssertEqual(loveEmotion(.idle), .love)
+        XCTAssertEqual(loveEmotion(.working), .love)
+        XCTAssertEqual(loveEmotion(.waiting, loveAge: 300), .love, "the limit is inclusive")
+        XCTAssertNil(loveEmotion(.idle, loveAge: 301))
+        XCTAssertNil(loveEmotion(.idle, loveAge: nil), "no affectionate message")
+    }
+
+    func testLovePriority() {
+        XCTAssertEqual(loveEmotion(.working, text: "Now I delete it."), .scared, "scared beats love")
+        XCTAssertEqual(loveEmotion(.idle, text: "Now I delete it."), .love, "scared needs working")
+        XCTAssertEqual(loveEmotion(.idle, text: "Sorry, it failed."), .love, "love beats crying")
+        XCTAssertEqual(loveEmotion(.idle, text: "It failed."), .love, "love beats sad")
+        XCTAssertEqual(loveEmotion(.waiting, elapsed: 5000), .love, "love beats angry")
+        XCTAssertEqual(loveEmotion(.working, elapsed: 5000), .love, "love beats stressed")
+        XCTAssertEqual(loveEmotion(.idle, text: "Sorry, it failed.", loveAge: 400), .crying, "after the window")
+    }
+
+    func testLoveBubbleAndLines() throws {
+        XCTAssertEqual(CompanionDialogue.pick(mood: .working, emotion: .love, sentences: ["First.", "Last."]), "First.")
+        let json = """
+        {"version":1,"size":[1,1],"moods":{"idle":[{"dir":"i","frames":1,"fps":1,"loop":true}]},
+         "lines":{"idle":["calm"],"love":["kyaa"]}}
+        """
+        let manifest = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8)))
+        var player = CompanionPlayer()
+        player.advance(now: now, mood: .idle, manifest: manifest, pick: { _ in 0 })
+        XCTAssertEqual(player.bubbleText(title: nil), "calm")
+        player.advance(now: now.addingTimeInterval(1), mood: .idle, manifest: manifest, sequenceKey: "idle",
+                       lineKey: "love", pick: { _ in 0 })
+        XCTAssertEqual(player.bubbleText(title: nil), "kyaa", "a love line without a new mood")
+        XCTAssertFalse(manifest.hasOwnSequences(forKey: "love", skin: nil), "no love mood: the base mood plays")
+    }
+
+    func testNewestTypedUserMessageIsFoundForTheAffectionRule() {
+        let lines = [
+            rawRecord(["type": "user", "timestamp": "2026-11-07T10:00:00Z", "message": ["content": "you are so cute"]]),
+            rawRecord(["type": "assistant", "message": ["content": [["type": "text", "text": "Thanks."]]]]),
+            rawRecord(["type": "user", "message": ["content": [["type": "tool_result", "content": "love"]]]]),
+            rawRecord(["type": "user", "message": ["content": "<command-name>/love</command-name>"]]),
+        ]
+        let user = CompanionDialogue.messages(inTail: Data(lines.joined(separator: "\n").utf8), startsMidFile: false,
+                                              limit: Int.max).last(where: { $0.role == .user })
+        XCTAssertEqual(user?.text, "you are so cute")
+        XCTAssertNotNil(user?.time)
+    }
 }
