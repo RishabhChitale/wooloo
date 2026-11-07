@@ -343,8 +343,8 @@ private struct DestinationContentView: View {
                 VStack(spacing: 0) {
                     CompanionPanel(store: herdr, agents: herdr.snapshot?.agents ?? [], workspaceID: herdr.selectedWorkspaceID,
                                    width: filesSidebarWidth, maxHeight: rightSidebarHeight * 0.65)
-                    filesSidebarSpaces
                     ActiveTasksSection(selectedSpace: herdr.selectedWorkspaceID, location: explorerLocation)
+                    filesSidebarSpaces
                     HStack(spacing: 12) {
                         Spacer()
                         Button { showsGitHub.toggle() } label: {

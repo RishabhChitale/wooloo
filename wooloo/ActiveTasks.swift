@@ -222,6 +222,7 @@ struct ActiveTasksSection: View {
     let selectedSpace: String?
     let location: WorkspaceFileLocation?
     @StateObject private var model = ActiveTasksModel()
+    @AppStorage("activeTasksCollapsed") private var collapsed = false
     @Environment(\.openURL) private var openURL
     @Environment(\.woolooTypography) private var typography
     @Environment(\.woolooTheme) private var theme
@@ -229,7 +230,11 @@ struct ActiveTasksSection: View {
     var body: some View {
         let result = ActiveTasks.rows(tracked: model.tracked, ci: model.ci, selectedSpace: selectedSpace)
         VStack(alignment: .leading, spacing: 3) {
+            Button { collapsed.toggle() } label: {
             HStack(spacing: 8) {
+                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: typography.caption, weight: .semibold))
+                    .frame(width: 8)
                 Text("ACTIVE TASKS")
                     .font(.system(size: typography.secondary, weight: .semibold))
                     .tracking(0.7)
@@ -238,16 +243,23 @@ struct ActiveTasksSection: View {
                 if !result.rows.isEmpty {
                     Text("\(result.rows.count)")
                         .font(.system(size: typography.caption, weight: .semibold))
-                        .foregroundStyle(theme.accent)
-                        .padding(.horizontal, 5)
-                        .background(theme.accent.opacity(0.15), in: Capsule())
+                        .foregroundStyle(Color.white)
+                        .padding(.horizontal, 6)
+                        .background(Color.pink, in: Capsule())
+                        .accessibilityLabel("\(result.rows.count) running")
                 }
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            if result.rows.isEmpty {
+            .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(collapsed ? "Expand Active Tasks" : "Collapse Active Tasks")
+            if collapsed {
+                EmptyView()
+            } else if result.rows.isEmpty {
                 Text("Nothing running")
                     .font(.system(size: typography.body))
                     .foregroundStyle(.secondary)
@@ -259,7 +271,7 @@ struct ActiveTasksSection: View {
             } else {
                 rowList(result.rows)
             }
-            if result.others > 0 {
+            if !collapsed, result.others > 0 {
                 Text("other Spaces: \(result.others)")
                     .font(.system(size: typography.caption))
                     .foregroundStyle(.tertiary)
