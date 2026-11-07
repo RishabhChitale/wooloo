@@ -138,8 +138,10 @@ final class HerdrCommandTests: XCTestCase {
     func testMenuActionsAreCommands() {
         let menu = ["close_current_tab", "switch_session", "toggle_files_sidebar", "refresh_files",
                     "rename_workspace", "close_workspace", "rename_tab", "close_tab", "close_pane",
-                    "project_search", "project_replace", "copy_pane_cwd", "reveal_pane_cwd", "toggle_wrap_lines"]
+                    "project_search", "project_replace", "copy_pane_cwd", "reveal_pane_cwd", "toggle_wrap_lines",
+                    "toggle_github", "toggle_file_explorer"]
         for action in menu { XCTAssertNotNil(HerdrCommand(action: action), action) }
+        XCTAssertEqual(HerdrCommand(action: "toggle_github"), .toggleGitHub)
         XCTAssertEqual(HerdrCommand(action: "project_replace"), .projectSearch(replace: true))
         XCTAssertEqual(HerdrCommand(action: "split_vertical"), .splitPane("right"))
         XCTAssertEqual(HerdrCommand(action: "split_horizontal"), .splitPane("down"))

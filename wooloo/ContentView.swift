@@ -76,6 +76,7 @@ private struct DestinationContentView: View {
     @AppStorage("AgentsInSelectedSpaceOnly") private var agentsInSelectedSpaceOnly = false
     @State private var followsHerdrAgentView = true
     @AppStorage("filesSidebarShowsExplorer") private var showsExplorer = false
+    @AppStorage("filesSidebarShowsGitHub") private var showsGitHub = false
     @State private var spacesContentHeight: CGFloat = 0
     @State private var rightSidebarHeight: CGFloat = 800
     @State private var connectionRequest = UUID()
@@ -342,10 +343,18 @@ private struct DestinationContentView: View {
                 VStack(spacing: 0) {
                     CompanionPanel(store: herdr, agents: herdr.snapshot?.agents ?? [], workspaceID: herdr.selectedWorkspaceID,
                                    width: filesSidebarWidth, maxHeight: rightSidebarHeight * 0.65)
-                    filesSidebarSpaces
+                    filesSidebarSpaces(fillsHeight: !showsExplorer && !showsGitHub)
                     ActiveTasksSection(selectedSpace: herdr.selectedWorkspaceID, location: explorerLocation)
-                    HStack {
+                    HStack(spacing: 12) {
                         Spacer()
+                        Button { showsGitHub.toggle() } label: {
+                            Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                                .font(.system(size: typography.secondary, weight: showsGitHub ? .semibold : .regular))
+                                .foregroundStyle(showsGitHub ? theme.accent : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(showsGitHub ? "Hide GitHub" : "Show GitHub")
+                        .accessibilityIdentifier("toggle-github")
                         Button { showsExplorer.toggle() } label: {
                             Label("Files", systemImage: "folder")
                                 .font(.system(size: typography.secondary, weight: showsExplorer ? .semibold : .regular))
@@ -358,6 +367,7 @@ private struct DestinationContentView: View {
                     .padding(.horizontal, 11)
                     .frame(height: typography.metric(24))
                     Divider()
+                    if showsExplorer || showsGitHub {
                     WorkspaceBrowserView(location: explorerLocation,
                                      machine: explorerMachine,
                                      refreshVersion: window.fileRefreshVersion,
@@ -398,7 +408,9 @@ private struct DestinationContentView: View {
                                      },
                                      commandTarget: window.explorer,
                                      spaces: herdr.snapshot?.workspaces ?? [],
-                                     showsExplorer: showsExplorer)
+                                     showsExplorer: showsExplorer,
+                                     showsGitHub: showsGitHub)
+                    }
                 }
                 .frame(width: filesSidebarWidth)
                 .background {
@@ -483,8 +495,8 @@ private struct DestinationContentView: View {
 
     /// The Spaces list on top of the right sidebar, so Spaces stay reachable with the left sidebar
     /// hidden. It is as tall as its rows, up to about six, and scrolls beyond that.
-    private var filesSidebarSpaces: some View {
-        ScrollView {
+    private func filesSidebarSpaces(fillsHeight: Bool) -> some View {
+        let scroll = ScrollView {
             spacesSection
                 .padding(7)
                 .background {
@@ -495,7 +507,11 @@ private struct DestinationContentView: View {
                     }
                 }
         }
-        .frame(height: min(spacesContentHeight, typography.metric(210)))
+        if fillsHeight {
+            // Neither Files nor GitHub below: the Spaces take the height that is left.
+            return AnyView(scroll.frame(maxHeight: .infinity, alignment: .top))
+        }
+        return AnyView(scroll.frame(height: min(spacesContentHeight, typography.metric(210))))
     }
 
     private var sidebar: some View {

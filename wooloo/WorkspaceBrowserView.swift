@@ -27,6 +27,8 @@ struct WorkspaceBrowserView: View {
     var spaces: [HerdrWorkspace] = []
     /// The explorer pane above the GitHub panel; without it GitHub fills the sidebar.
     var showsExplorer = true
+    /// The GitHub panel; with neither pane shown the view is not displayed at all.
+    var showsGitHub = true
     @State private var commandToken = UUID()
 
     /// Not private so snapshot tests can open folders and select a row before it appears.
@@ -60,6 +62,8 @@ struct WorkspaceBrowserView: View {
             // A collapsed GitHub panel leaves the available height to Explorer.
             if !showsExplorer {
                 WorkspaceGitHubView(location: location, isCollapsed: .constant(false), model: githubModel)
+            } else if !showsGitHub {
+                explorer
             } else if githubCollapsed {
                 VStack(spacing: 0) {
                     explorer.frame(maxHeight: .infinity)

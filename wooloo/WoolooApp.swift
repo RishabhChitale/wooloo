@@ -50,6 +50,7 @@ private struct WoolooCommands: Commands {
     /// App-wide, so the checkmark does not depend on the focused window.
     @AppStorage(EditorLineWrapping.storageKey) private var wrapsLines = false
     @AppStorage("filesSidebarShowsExplorer") private var showsExplorer = false
+    @AppStorage("filesSidebarShowsGitHub") private var showsGitHub = false
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
@@ -100,6 +101,7 @@ private struct WoolooCommands: Commands {
             item("toggle_files_sidebar",
                  title: context?.showsFilesSidebar == false ? "Show Files and Changes" : "Hide Files and Changes")
             item("toggle_file_explorer", title: showsExplorer ? "Hide File Explorer" : "Show File Explorer")
+            item("toggle_github", title: showsGitHub ? "Hide GitHub" : "Show GitHub")
             item("refresh_files")
             Divider()
             toggle("toggle_wrap_lines", title: "Wrap Lines", isOn: wrapsLines)

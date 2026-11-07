@@ -53,6 +53,8 @@ enum HerdrCommand: Equatable {
     case toggleSidebar, toggleFilesSidebar, refreshFiles
     /// Shows or hides the explorer pane of the right sidebar (`filesSidebarShowsExplorer`).
     case toggleFileExplorer
+    /// Shows or hides the GitHub panel of the right sidebar (`filesSidebarShowsGitHub`).
+    case toggleGitHub
     /// Wraps lines in document editors, or stops wrapping them; see `EditorLineWrapping`.
     case toggleWrapLines
     case projectSearch(replace: Bool)
@@ -100,6 +102,7 @@ enum HerdrCommand: Equatable {
         case "toggle_sidebar": self = .toggleSidebar
         case "toggle_files_sidebar": self = .toggleFilesSidebar
         case "toggle_file_explorer": self = .toggleFileExplorer
+        case "toggle_github": self = .toggleGitHub
         case "refresh_files": self = .refreshFiles
         case "toggle_wrap_lines": self = .toggleWrapLines
         case "project_search": self = .projectSearch(replace: false)
