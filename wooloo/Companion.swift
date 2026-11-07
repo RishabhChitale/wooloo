@@ -53,6 +53,16 @@ struct CompanionActivity: Decodable, Equatable, Sendable, Identifiable {
     let mood: String?
 }
 
+struct CompanionSkin: Decodable, Equatable, Sendable {
+    let label: String
+    let moods: [String: [CompanionSequence]]
+}
+
+struct CompanionSkinChoice: Equatable, Sendable {
+    let id: String
+    let label: String
+}
+
 struct CompanionSticker: Decodable, Equatable, Sendable, Identifiable {
     let id: String
     let label: String
@@ -79,6 +89,8 @@ extension CompanionManifest {
         stickers = ((try? values.decodeIfPresent([Lossy<CompanionSticker>].self, forKey: .stickers)) ?? nil)?
             .compactMap(\.value) ?? []
         font = try? values.decodeIfPresent(String.self, forKey: .font)
+        skins = ((try? values.decodeIfPresent([String: Lossy<CompanionSkin>].self, forKey: .skins)) ?? nil)?
+            .compactMapValues(\.value) ?? [:]
     }
 }
 
@@ -115,9 +127,11 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
     let stickers: [CompanionSticker]
     /// A pixel font file in the companion folder, used by the boxes under her.
     let font: String?
+    /// Other looks for the webcam, by id ("streamer", "dark_angel"…); the top-level `moods` are Ame's.
+    let skins: [String: CompanionSkin]
 
     enum CodingKeys: String, CodingKey {
-        case version, size, moods, lines, background, activities, stickers, font
+        case version, size, moods, lines, background, activities, stickers, font, skins
         case spriteRect = "sprite_rect"
     }
 
@@ -151,7 +165,45 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
                                  spriteRect: scene != nil ? rect : nil,
                                  activities: manifest.activities.filter { CompanionBackground.isSafe($0.icon) },
                                  stickers: manifest.stickers.filter { CompanionBackground.isSafe($0.image) },
-                                 font: manifest.font.flatMap { CompanionBackground.isSafe($0) ? $0 : nil })
+                                 font: manifest.font.flatMap { CompanionBackground.isSafe($0) ? $0 : nil },
+                                 skins: manifest.skins.compactMapValues { skin in
+                                     let usable = skin.moods.mapValues { $0.filter(\.isValid) }
+                                     return usable.values.contains(where: { !$0.isEmpty })
+                                         ? CompanionSkin(label: skin.label, moods: usable) : nil
+                                 })
+    }
+
+    static let defaultSkin = "ame"
+
+    /// The skins to choose from: Ame first, then the manifest's others in a fixed order.
+    var skinChoices: [CompanionSkinChoice] {
+        let order = ["streamer", "dark_angel"]
+        let others = skins.keys.filter { $0 != Self.defaultSkin }.sorted { lhs, rhs in
+            let (l, r) = (order.firstIndex(of: lhs) ?? order.count, order.firstIndex(of: rhs) ?? order.count)
+            return l == r ? lhs < rhs : l < r
+        }
+        return ([Self.defaultSkin] + others).map {
+            CompanionSkinChoice(id: $0, label: skins[$0]?.label ?? ($0 == Self.defaultSkin ? "Ame" : $0))
+        }
+    }
+
+    /// `id` if it is a skin of this manifest, else Ame.
+    func resolvedSkin(_ id: String?) -> String {
+        id.flatMap { id in skinChoices.contains { $0.id == id } ? id : nil } ?? Self.defaultSkin
+    }
+
+    /// A skin's sequences for a mood; when it lacks the mood, its idle ones, then the top-level
+    /// (Ame's) for that mood.
+    func sequences(forKey key: String, skin: String?) -> [CompanionSequence] {
+        guard let skin, let moods = skins[skin]?.moods else { return sequences(forKey: key) }
+        if let own = moods[key], !own.isEmpty { return own }
+        if let idle = moods["idle"], !idle.isEmpty { return idle }
+        return sequences(forKey: key)
+    }
+
+    /// A still frame of the skin's idle sequence, for its tile in the settings.
+    func previewPath(skin: String) -> String? {
+        sequences(forKey: "idle", skin: skin).first.map { $0.dir + "/0.png" }
     }
 
     /// The sequences of a mood or of an activity's mood ("game", "stream_watch"…).
@@ -161,9 +213,9 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
 
     /// Which sequences play: the commander's mood wins while it works or waits; when idle or done
     /// she plays the chosen activity's, if it is available and has sequences.
-    func sequenceKey(mood: CompanionMood, activityID: String?) -> String {
+    func sequenceKey(mood: CompanionMood, activityID: String?, skin: String? = nil) -> String {
         guard mood == .idle || mood == .done, let key = activity(id: activityID)?.mood,
-              !sequences(forKey: key).isEmpty else { return mood.rawValue }
+              !sequences(forKey: key, skin: skin).isEmpty else { return mood.rawValue }
         return key
     }
 
@@ -195,16 +247,17 @@ struct CompanionPlayer {
     /// has played long enough, or a line has been up long enough. Returns whether anything changed.
     @discardableResult
     mutating func advance(now: Date, mood newMood: CompanionMood, manifest: CompanionManifest,
-                          sequenceKey: String? = nil,
+                          sequenceKey: String? = nil, skin: String? = nil,
                           pick: (Int) -> Int = { Int.random(in: 0..<$0) }) -> Bool {
         var changed = false
         let moodChanged = mood != newMood
         let key = sequenceKey ?? newMood.rawValue
-        let keyChanged = playingKey != key
+        let identity = (skin ?? "") + "|" + key
+        let keyChanged = playingKey != identity
         let elapsed = now.timeIntervalSince(sequenceStart)
         if moodChanged || keyChanged || sequence == nil
             || (sequence.map { $0.loop ? elapsed >= Self.loopRotation : elapsed >= $0.duration } ?? true) {
-            let choices = manifest.sequences(forKey: key)
+            let choices = manifest.sequences(forKey: key, skin: skin)
             // Not the same sequence twice in a row when there is another one.
             let others = choices.filter { $0 != sequence }
             let pool = others.isEmpty || moodChanged || keyChanged ? choices : others
@@ -222,7 +275,7 @@ struct CompanionPlayer {
             changed = true
         }
         mood = newMood
-        playingKey = key
+        playingKey = identity
         return changed
     }
 
@@ -514,6 +567,7 @@ final class CompanionModel: ObservableObject {
     private var dialogueRequested = Date.distantPast
     private var dialogueInFlight = false
     private var directory = CompanionManifest.directory
+    private var currentSkin: String?
 
     /// Loading starts at creation: the view shows nothing until the manifest is in, so an
     /// `onAppear` on that empty content would never fire.
@@ -532,17 +586,27 @@ final class CompanionModel: ObservableObject {
             self.fontName = result.1
             self.manifest = result.0
             if let manifest = result.0 {
-                for path in manifest.activities.map(\.icon) + manifest.stickers.map(\.image) { self.ensureImage(path) }
+                let previews = manifest.skinChoices.compactMap { manifest.previewPath(skin: $0.id) }
+                for path in manifest.activities.map(\.icon) + manifest.stickers.map(\.image) + previews {
+                    self.ensureImage(path)
+                }
             }
         }
     }
 
     /// Called as time passes and when the commander's mood or the chosen activity changes.
-    func advance(now: Date, mood: CompanionMood, activityID: String? = nil) {
+    func advance(now: Date, mood: CompanionMood, activityID: String? = nil, skin: String? = nil) {
         guard let manifest else { return }
         var next = player
-        let key = manifest.sequenceKey(mood: mood, activityID: activityID)
-        if next.advance(now: now, mood: mood, manifest: manifest, sequenceKey: key) { player = next }
+        let skin = manifest.skins.isEmpty ? nil : manifest.resolvedSkin(skin)
+        if skin != currentSkin {
+            // Another skin: the old one's frames are not needed any more.
+            currentSkin = skin
+            loaded = [:]
+            loading = loading.filter { $0.hasPrefix("image:") }
+        }
+        let key = manifest.sequenceKey(mood: mood, activityID: activityID, skin: skin)
+        if next.advance(now: now, mood: mood, manifest: manifest, sequenceKey: key, skin: skin) { player = next }
         if let sequence = next.sequence { ensureLoaded(sequence) }
         if let path = manifest.backgroundPath(at: now) { ensureImage(path) }
     }
@@ -648,6 +712,8 @@ struct CompanionView: View {
     /// The sidebar's width; the room is 0.75 times as tall.
     let width: CGFloat
     @AppStorage(CompanionPreferences.activityKey) private var activityID = CompanionPreferences.defaultActivity
+    @AppStorage(CompanionPreferences.skinKey) private var skin = CompanionManifest.defaultSkin
+    @State private var showsSettings = false
 
     var body: some View {
         let mood = CompanionMood(agentStatus: commander?.agentStatus)
@@ -662,14 +728,22 @@ struct CompanionView: View {
                 }
             }
             .onChange(of: context.date) { _, date in
-                model.advance(now: date, mood: mood, activityID: activityID)
+                model.advance(now: date, mood: mood, activityID: activityID, skin: skin)
                 model.refreshDialogue(sessionID: commander?.agentSessionID, now: date)
             }
-            .onChange(of: mood) { _, mood in model.advance(now: Date(), mood: mood, activityID: activityID) }
-            .onChange(of: activityID) { _, id in model.advance(now: Date(), mood: mood, activityID: id) }
-            .onAppear { model.advance(now: Date(), mood: mood, activityID: activityID) }
+            .onChange(of: mood) { _, mood in model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin) }
+            .onChange(of: activityID) { _, id in model.advance(now: Date(), mood: mood, activityID: id, skin: skin) }
+            .onChange(of: skin) { _, skin in model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin) }
+            .onAppear { model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin) }
         }
         .frame(height: width * 0.75)
+        .overlay(alignment: .topTrailing) {
+            if model.manifest?.skins.isEmpty == false {
+                CompanionGearButton(isPresented: $showsSettings) {
+                    CompanionWebcamSettings(model: model, isPresented: $showsSettings)
+                }
+            }
+        }
         .accessibilityHidden(true)
     }
 }

@@ -10,6 +10,15 @@ enum CompanionPreferences {
     static let activitiesCollapsedKey = "companionActivitiesCollapsed"
     static let jineCollapsedKey = "companionJineCollapsed"
     static let defaultActivity = "idle"
+    static let skinKey = "companionSkin"
+
+    static func skinID(defaults: UserDefaults = .standard) -> String {
+        defaults.string(forKey: skinKey) ?? CompanionManifest.defaultSkin
+    }
+
+    static func setSkinID(_ id: String, defaults: UserDefaults = .standard) {
+        defaults.set(id, forKey: skinKey)
+    }
 
     static func activityID(defaults: UserDefaults = .standard) -> String {
         defaults.string(forKey: activityKey) ?? defaultActivity
@@ -93,6 +102,88 @@ struct CompanionBox<Content: View>: View {
         }
         .padding(3)
         .background(CompanionPalette.frame, in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// The small gear in the room's corner that opens the webcam settings.
+struct CompanionGearButton<Settings: View>: View {
+    @Binding var isPresented: Bool
+    let settings: Settings
+
+    init(isPresented: Binding<Bool>, @ViewBuilder settings: () -> Settings) {
+        _isPresented = isPresented
+        self.settings = settings()
+    }
+
+    var body: some View {
+        Button { isPresented.toggle() } label: {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(CompanionPalette.indigo)
+                .frame(width: 16, height: 16)
+                .background(CompanionPalette.panel)
+                .overlay(Rectangle().strokeBorder(CompanionPalette.indigo, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .padding(3)
+        .help("Webcam Settings")
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) { settings }
+    }
+}
+
+/// "Webcam Settings": which skin she wears. The tiles show a still of each skin's idle sequence.
+struct CompanionWebcamSettings: View {
+    @ObservedObject var model: CompanionModel
+    @Binding var isPresented: Bool
+    @AppStorage(CompanionPreferences.skinKey) private var skin = CompanionManifest.defaultSkin
+    @Environment(\.woolooTypography) private var typography
+
+    var body: some View {
+        // The [x] of the chrome closes the window.
+        CompanionBox(title: "Webcam Settings", fontName: model.fontName,
+                     collapsed: Binding(get: { false }, set: { _ in isPresented = false })) {
+            if let manifest = model.manifest {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Skin")
+                        .font(CompanionFont.font(model.fontName, size: typography.secondary))
+                        .foregroundStyle(CompanionPalette.indigo)
+                    HStack(spacing: 4) {
+                        ForEach(manifest.skinChoices, id: \.id) { choice in
+                            let selected = manifest.resolvedSkin(skin) == choice.id
+                            Button { skin = choice.id } label: {
+                                VStack(spacing: 3) {
+                                    Group {
+                                        if let path = manifest.previewPath(skin: choice.id),
+                                           let image = model.image(forPath: path) {
+                                            Image(decorative: image, scale: 1).interpolation(.none).resizable()
+                                                .aspectRatio(contentMode: .fit)
+                                        } else {
+                                            Color.clear
+                                        }
+                                    }
+                                    .frame(width: 64, height: 44)
+                                    Text(choice.label)
+                                        .font(CompanionFont.font(model.fontName, size: typography.caption))
+                                        .foregroundStyle(CompanionPalette.indigo)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.7)
+                                }
+                                .padding(4)
+                                .background(selected ? CompanionPalette.highlight : Color.clear,
+                                            in: RoundedRectangle(cornerRadius: 4))
+                                .overlay(RoundedRectangle(cornerRadius: 4)
+                                    .strokeBorder(CompanionPalette.indigo.opacity(selected ? 1 : 0.3), lineWidth: 1))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help(choice.label)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(width: 250)
+        .padding(4)
     }
 }
 

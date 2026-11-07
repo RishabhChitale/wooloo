@@ -430,4 +430,74 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(snapshot.text, "Hello.")
         XCTAssertEqual(snapshot.messages.map(\.text), ["hi", "Hello."])
     }
+
+    // MARK: Skins
+
+    private func skinManifest() throws -> CompanionManifest {
+        let json = """
+        {"version":1,"size":[64,64],
+         "moods":{"idle":[{"dir":"ame/idle","frames":2,"fps":2,"loop":true}],
+                  "working":[{"dir":"ame/working","frames":2,"fps":2,"loop":true}],
+                  "done":[{"dir":"ame/done","frames":2,"fps":2,"loop":false}]},
+         "lines":{},
+         "skins":{"streamer":{"label":"Streamer","moods":{"idle":[{"dir":"st/idle","frames":2,"fps":2,"loop":true}],
+                                                           "working":[{"dir":"st/working","frames":2,"fps":2,"loop":true}]}},
+                  "dark_angel":{"label":"Dark Angel","moods":{"working":[{"dir":"da/working","frames":2,"fps":2,"loop":true}]}},
+                  "broken":{"label":"Broken"},
+                  "empty":{"label":"Empty","moods":{"idle":[]}}}}
+        """
+        return try XCTUnwrap(CompanionManifest.decode(Data(json.utf8)))
+    }
+
+    func testSkinsDecodeAndAreOrdered() throws {
+        let manifest = try skinManifest()
+        XCTAssertEqual(manifest.skinChoices, [CompanionSkinChoice(id: "ame", label: "Ame"),
+                                              CompanionSkinChoice(id: "streamer", label: "Streamer"),
+                                              CompanionSkinChoice(id: "dark_angel", label: "Dark Angel")],
+                       "unusable skins are dropped; Ame comes first")
+        XCTAssertEqual(try XCTUnwrap(CompanionManifest.decode(manifestJSON(extra: ""))).skins.count, 0, "no skins: no gear")
+        XCTAssertEqual(manifest.previewPath(skin: "streamer"), "st/idle/0.png")
+    }
+
+    func testSkinSequencesFallBackToItsIdleThenToTheTopLevel() throws {
+        let manifest = try skinManifest()
+        XCTAssertEqual(manifest.sequences(forKey: "working", skin: "streamer").map(\.dir), ["st/working"])
+        XCTAssertEqual(manifest.sequences(forKey: "done", skin: "streamer").map(\.dir), ["st/idle"], "its own idle")
+        XCTAssertEqual(manifest.sequences(forKey: "done", skin: "dark_angel").map(\.dir), ["ame/done"],
+                       "no idle of its own: the top-level mood")
+        XCTAssertEqual(manifest.sequences(forKey: "idle", skin: "dark_angel").map(\.dir), ["ame/idle"])
+        XCTAssertEqual(manifest.sequences(forKey: "working", skin: "ame").map(\.dir), ["ame/working"])
+        XCTAssertEqual(manifest.sequences(forKey: "working", skin: nil).map(\.dir), ["ame/working"])
+        XCTAssertEqual(manifest.sequences(forKey: "working", skin: "unknown").map(\.dir), ["ame/working"])
+    }
+
+    func testUnknownSkinResolvesToAme() throws {
+        let manifest = try skinManifest()
+        XCTAssertEqual(manifest.resolvedSkin("streamer"), "streamer")
+        XCTAssertEqual(manifest.resolvedSkin("gone"), "ame")
+        XCTAssertEqual(manifest.resolvedSkin(nil), "ame")
+    }
+
+    func testSwitchingSkinSwapsSequencesImmediately() throws {
+        let manifest = try skinManifest()
+        var player = CompanionPlayer()
+        let start = Date(timeIntervalSince1970: 1000)
+        player.advance(now: start, mood: .working, manifest: manifest, skin: "ame", pick: { _ in 0 })
+        XCTAssertEqual(player.sequence?.dir, "ame/working")
+        XCTAssertTrue(player.advance(now: start.addingTimeInterval(0.1), mood: .working, manifest: manifest,
+                                     skin: "streamer", pick: { _ in 0 }))
+        XCTAssertEqual(player.sequence?.dir, "st/working")
+        XCTAssertFalse(player.advance(now: start.addingTimeInterval(0.2), mood: .working, manifest: manifest,
+                                      skin: "streamer", pick: { _ in 0 }))
+    }
+
+    func testSkinChoicePersists() throws {
+        let suite = "wooloo.companion.skin.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(CompanionPreferences.skinID(defaults: defaults), "ame")
+        CompanionPreferences.setSkinID("dark_angel", defaults: defaults)
+        XCTAssertEqual(CompanionPreferences.skinID(defaults: defaults), "dark_angel")
+        XCTAssertEqual(defaults.string(forKey: "companionSkin"), "dark_angel", "the key the view reads")
+    }
 }
