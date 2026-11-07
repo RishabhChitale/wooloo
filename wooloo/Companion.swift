@@ -151,6 +151,10 @@ final class CompanionModel: ObservableObject {
     private var loading: Set<String> = []
     private var started = false
 
+    /// Loading starts at creation: the view shows nothing until the manifest is in, so an
+    /// `onAppear` on that empty content would never fire.
+    init() { start() }
+
     func start() {
         guard !started else { return }
         started = true
