@@ -201,6 +201,13 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
         return sequences(forKey: key)
     }
 
+    /// Whether the skin itself (Ame's top-level moods for Ame) has sequences for a mood, without
+    /// the fallbacks of `sequences(forKey:skin:)`: an emotion it lacks is not shown.
+    func hasOwnSequences(forKey key: String, skin: String?) -> Bool {
+        if let skin, let moods = skins[skin]?.moods { return !(moods[key] ?? []).isEmpty }
+        return !sequences(forKey: key).isEmpty
+    }
+
     /// A still frame of the skin's idle sequence, for its tile in the settings.
     func previewPath(skin: String) -> String? {
         sequences(forKey: "idle", skin: skin).first.map { $0.dir + "/0.png" }
@@ -297,6 +304,65 @@ struct CompanionPlayer {
     }
 }
 
+/// Feelings that override the base mood, strongest first: scared, crying, sad, angry, stressed.
+enum CompanionEmotion: String, CaseIterable, Sendable {
+    case scared, crying, sad, angry, stressed
+}
+
+/// Which emotion words the commander's newest text holds. Words match whole, in lower case.
+struct CompanionTextSignals: Equatable, Sendable {
+    var scary = false
+    var failure = false
+    var sorry = false
+
+    static let scaryWords: Set<String> = ["release", "publish", "tag", "delete", "force", "irreversible", "production"]
+    static let failureWords: Set<String> = ["failed", "failure", "error", "broke", "broken", "couldn't", "can't",
+                                            "denied", "blocked", "crashed"]
+
+    init() {}
+
+    init(text: String?) {
+        guard let text else { return }
+        let normalized = text.lowercased().replacingOccurrences(of: "’", with: "'")
+        let words = Set(normalized.split(whereSeparator: { !($0.isLetter || $0 == "'") }).map(String.init))
+        scary = !words.isDisjoint(with: Self.scaryWords)
+        failure = !words.isDisjoint(with: Self.failureWords)
+        sorry = words.contains("sorry")
+    }
+}
+
+/// How long the commander has had the same status, restarted whenever the status changes.
+struct CompanionStatusTimer: Equatable, Sendable {
+    private(set) var status: String?
+    private(set) var since: Date?
+
+    mutating func observe(_ newStatus: String?, now: Date) {
+        guard since == nil || newStatus != status else { return }
+        status = newStatus
+        since = now
+    }
+
+    func elapsed(now: Date) -> TimeInterval { since.map { max(0, now.timeIntervalSince($0)) } ?? 0 }
+}
+
+enum CompanionEmotionRules {
+    static let messageWindow: TimeInterval = 10 * 60
+    static let angryAfter: TimeInterval = 10 * 60
+    static let stressedAfter: TimeInterval = 15 * 60
+
+    /// The strongest emotion that applies, or nil for the base mood. `textTime` is when the newest
+    /// assistant text was written; without it a text counts as too old for the failure rules.
+    static func resolve(mood: CompanionMood, signals: CompanionTextSignals, textTime: Date?,
+                        statusElapsed: TimeInterval, now: Date) -> CompanionEmotion? {
+        let fresh = textTime.map { now.timeIntervalSince($0) <= messageWindow } ?? false
+        if mood == .working, signals.scary { return .scared }
+        if signals.failure, signals.sorry, fresh { return .crying }
+        if signals.failure, fresh { return .sad }
+        if mood == .waiting, statusElapsed > angryAfter { return .angry }
+        if mood == .working, statusElapsed > stressedAfter { return .stressed }
+        return nil
+    }
+}
 /// One turn of the commander's conversation, as the JINE box shows it.
 struct CompanionMessage: Equatable, Sendable {
     enum Role: Equatable, Sendable { case user, assistant }
@@ -338,6 +404,7 @@ struct CompanionMessage: Equatable, Sendable {
 /// What the transcript's tail holds: the newest assistant text, and the last few messages.
 struct CompanionTranscriptSnapshot: Equatable, Sendable {
     var text: String?
+    var textTime: Date?
     var messages: [CompanionMessage] = []
 }
 /// What the commander says, taken from the text parts of its newest Claude Code reply. Only those
@@ -349,6 +416,11 @@ enum CompanionDialogue {
     /// starts in the middle of the file begins with a partial line, which is dropped. Records of
     /// other types, and replies without a text part (tool calls only), are skipped.
     static func latestAssistantText(inTail data: Data, startsMidFile: Bool) -> String? {
+        latestAssistant(inTail: data, startsMidFile: startsMidFile)?.text
+    }
+
+    /// The same, with the time written on the record.
+    static func latestAssistant(inTail data: Data, startsMidFile: Bool) -> (text: String, time: Date?)? {
         var body = data[...]
         if startsMidFile {
             guard let newline = body.firstIndex(of: 0x0A) else { return nil }
@@ -367,7 +439,9 @@ enum CompanionDialogue {
                 }
             }
             let text = parts.joined(separator: "\n")
-            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return text }
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return (text, (record["timestamp"] as? String).flatMap(parseTime))
+            }
         }
         return nil
     }
@@ -457,8 +531,13 @@ enum CompanionDialogue {
 
     /// Working: what it is saying now (the last sentence). Waiting: its question, else the last
     /// sentence. Done or idle: how the reply begins.
-    static func pick(mood: CompanionMood, sentences: [String]) -> String? {
+    static func pick(mood: CompanionMood, emotion: CompanionEmotion? = nil, sentences: [String]) -> String? {
         let sentence: String?
+        switch emotion {
+        case .sad, .crying: return sentences.first.map(cap)
+        case .scared, .stressed: return sentences.last.map(cap)
+        case .angry, nil: break
+        }
         switch mood {
         case .working: sentence = sentences.last
         case .waiting: sentence = sentences.last(where: { $0.hasSuffix("?") }) ?? sentences.last
@@ -538,8 +617,9 @@ actor CompanionTranscriptReader {
         let offset = max(0, size - tailBytes)
         guard (try? handle.seek(toOffset: UInt64(offset))) != nil,
               let data = try? handle.readToEnd() else { return CompanionTranscriptSnapshot() }
+        let latest = CompanionDialogue.latestAssistant(inTail: data, startsMidFile: offset > 0)
         return CompanionTranscriptSnapshot(
-            text: CompanionDialogue.latestAssistantText(inTail: data, startsMidFile: offset > 0),
+            text: latest?.text, textTime: latest?.time,
             messages: CompanionDialogue.messages(inTail: data, startsMidFile: offset > 0))
     }
 }
@@ -556,6 +636,11 @@ final class CompanionModel: ObservableObject {
     @Published private(set) var sentences: [String] = []
     @Published private(set) var messages: [CompanionMessage] = []
     @Published private(set) var sendError: String?
+    /// The emotion she shows: the strongest rule that applies and that the manifest has sequences for.
+    @Published private(set) var emotion: CompanionEmotion?
+    private var signals = CompanionTextSignals()
+    private var textTime: Date?
+    private var statusTimer = CompanionStatusTimer()
     /// Single images of the companion folder (scene, activity icons, stickers), by relative path.
     @Published private(set) var images: [String: CGImage] = [:]
     /// The registered skin font, if the manifest has one.
@@ -595,7 +680,8 @@ final class CompanionModel: ObservableObject {
     }
 
     /// Called as time passes and when the commander's mood or the chosen activity changes.
-    func advance(now: Date, mood: CompanionMood, activityID: String? = nil, skin: String? = nil) {
+    func advance(now: Date, mood: CompanionMood, activityID: String? = nil, skin: String? = nil,
+                 status: String? = nil) {
         guard let manifest else { return }
         var next = player
         let skin = manifest.skins.isEmpty ? nil : manifest.resolvedSkin(skin)
@@ -605,14 +691,21 @@ final class CompanionModel: ObservableObject {
             loaded = [:]
             loading = loading.filter { $0.hasPrefix("image:") }
         }
-        let key = manifest.sequenceKey(mood: mood, activityID: activityID, skin: skin)
+        statusTimer.observe(status ?? mood.rawValue, now: now)
+        let candidate = CompanionEmotionRules.resolve(mood: mood, signals: signals, textTime: textTime,
+                                                      statusElapsed: statusTimer.elapsed(now: now), now: now)
+        let applied = candidate.flatMap { manifest.hasOwnSequences(forKey: $0.rawValue, skin: skin) ? $0 : nil }
+        if applied != emotion { emotion = applied }
+        let key = applied?.rawValue ?? manifest.sequenceKey(mood: mood, activityID: activityID, skin: skin)
         if next.advance(now: now, mood: mood, manifest: manifest, sequenceKey: key, skin: skin) { player = next }
         if let sequence = next.sequence { ensureLoaded(sequence) }
         if let path = manifest.backgroundPath(at: now) { ensureImage(path) }
     }
 
     /// The commander's words for the current mood, from its newest reply.
-    var dialogue: String? { player.mood.flatMap { CompanionDialogue.pick(mood: $0, sentences: sentences) } }
+    var dialogue: String? {
+        player.mood.flatMap { CompanionDialogue.pick(mood: $0, emotion: emotion, sentences: sentences) }
+    }
 
     /// Re-reads the commander's transcript, off the main thread and at most every 1.5 s.
     func refreshDialogue(sessionID: String?, now: Date = Date()) {
@@ -621,6 +714,8 @@ final class CompanionModel: ObservableObject {
             dialogueRequested = .distantPast
             if !sentences.isEmpty { sentences = [] }
             if !messages.isEmpty { messages = [] }
+            signals = CompanionTextSignals()
+            textTime = nil
         }
         guard let sessionID, !dialogueInFlight,
               now.timeIntervalSince(dialogueRequested) >= CompanionTranscriptReader.minimumInterval else { return }
@@ -634,6 +729,8 @@ final class CompanionModel: ObservableObject {
             let next = snapshot.text.map { CompanionDialogue.sentences(fromMarkdown: $0) } ?? []
             if next != self.sentences { self.sentences = next }
             if snapshot.messages != self.messages { self.messages = snapshot.messages }
+            self.signals = CompanionTextSignals(text: snapshot.text)
+            self.textTime = snapshot.textTime
         }
     }
 
@@ -728,13 +825,13 @@ struct CompanionView: View {
                 }
             }
             .onChange(of: context.date) { _, date in
-                model.advance(now: date, mood: mood, activityID: activityID, skin: skin)
+                model.advance(now: date, mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus)
                 model.refreshDialogue(sessionID: commander?.agentSessionID, now: date)
             }
-            .onChange(of: mood) { _, mood in model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin) }
-            .onChange(of: activityID) { _, id in model.advance(now: Date(), mood: mood, activityID: id, skin: skin) }
-            .onChange(of: skin) { _, skin in model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin) }
-            .onAppear { model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin) }
+            .onChange(of: mood) { _, mood in model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus) }
+            .onChange(of: activityID) { _, id in model.advance(now: Date(), mood: mood, activityID: id, skin: skin, status: commander?.agentStatus) }
+            .onChange(of: skin) { _, skin in model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus) }
+            .onAppear { model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus) }
         }
         .frame(height: width * 0.75)
         .overlay(alignment: .topTrailing) {

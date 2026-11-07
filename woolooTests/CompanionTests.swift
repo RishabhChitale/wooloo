@@ -500,4 +500,118 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(CompanionPreferences.skinID(defaults: defaults), "dark_angel")
         XCTAssertEqual(defaults.string(forKey: "companionSkin"), "dark_angel", "the key the view reads")
     }
+
+    // MARK: Emotions
+
+    private let now = Date(timeIntervalSince1970: 2_000_000)
+
+    private func emotion(_ mood: CompanionMood, text: String? = nil, age: TimeInterval? = 60,
+                         elapsed: TimeInterval = 0) -> CompanionEmotion? {
+        CompanionEmotionRules.resolve(mood: mood, signals: CompanionTextSignals(text: text),
+                                      textTime: age.map { now.addingTimeInterval(-$0) },
+                                      statusElapsed: elapsed, now: now)
+    }
+
+    func testSignalsMatchWholeWordsIgnoringCase() {
+        XCTAssertTrue(CompanionTextSignals(text: "I will PUBLISH it, then tag.").scary)
+        XCTAssertTrue(CompanionTextSignals(text: "It is production-ready").scary, "hyphens separate words")
+        XCTAssertFalse(CompanionTextSignals(text: "tagged tagline releases").scary, "only whole words")
+        XCTAssertTrue(CompanionTextSignals(text: "It crashed.").failure)
+        XCTAssertTrue(CompanionTextSignals(text: "I couldn’t do that").failure, "curly apostrophe")
+        XCTAssertTrue(CompanionTextSignals(text: "I can't").failure)
+        XCTAssertFalse(CompanionTextSignals(text: "errors everywhere").failure)
+        XCTAssertTrue(CompanionTextSignals(text: "Sorry about that").sorry)
+        XCTAssertEqual(CompanionTextSignals(text: nil), CompanionTextSignals())
+    }
+
+    func testScaredNeedsWorkingAndAScaryWord() {
+        XCTAssertEqual(emotion(.working, text: "Now I delete the branch."), .scared)
+        XCTAssertEqual(emotion(.working, text: "Pushing to production", age: 99_999), .scared, "any age")
+        XCTAssertNil(emotion(.idle, text: "I will force push"))
+        XCTAssertNil(emotion(.waiting, text: "May I publish?"))
+    }
+
+    func testCryingNeedsAFailureWordAndSorryWithinTenMinutes() {
+        XCTAssertEqual(emotion(.idle, text: "Sorry, the build failed."), .crying)
+        XCTAssertEqual(emotion(.done, text: "I'm sorry, it broke.", age: 599), .crying)
+        XCTAssertEqual(emotion(.working, text: "Sorry, it crashed."), .crying, "any status")
+        XCTAssertEqual(emotion(.idle, text: "Sorry, it failed.", age: 601), nil, "too old")
+        XCTAssertNil(emotion(.idle, text: "Sorry about the wait."), "no failure word")
+    }
+
+    func testSadNeedsAFailureWordWithinTenMinutes() {
+        XCTAssertEqual(emotion(.idle, text: "The deploy was denied."), .sad)
+        XCTAssertEqual(emotion(.done, text: "Access is blocked.", age: 600), .sad, "the limit is inclusive")
+        XCTAssertNil(emotion(.idle, text: "Access is blocked.", age: 601))
+        XCTAssertNil(emotion(.idle, text: "All good."))
+        XCTAssertNil(emotion(.idle, text: "It failed.", age: nil), "no timestamp: too old")
+    }
+
+    func testAngryAndStressedWaitForTheirTimers() {
+        XCTAssertNil(emotion(.waiting, elapsed: 600))
+        XCTAssertEqual(emotion(.waiting, elapsed: 601), .angry)
+        XCTAssertNil(emotion(.working, elapsed: 900))
+        XCTAssertEqual(emotion(.working, elapsed: 901), .stressed)
+        XCTAssertNil(emotion(.idle, elapsed: 5000))
+        XCTAssertNil(emotion(.done, elapsed: 5000))
+    }
+
+    func testPriorityOrder() {
+        // scared > crying > sad > angry > stressed
+        XCTAssertEqual(emotion(.working, text: "Sorry, I will delete it but the tests failed.", elapsed: 5000), .scared)
+        XCTAssertEqual(emotion(.waiting, text: "Sorry, it failed.", elapsed: 5000), .crying)
+        XCTAssertEqual(emotion(.waiting, text: "It failed.", elapsed: 5000), .sad)
+        XCTAssertEqual(emotion(.waiting, text: "All fine.", elapsed: 5000), .angry)
+        XCTAssertEqual(emotion(.working, text: "It failed.", elapsed: 5000), .sad, "sad beats stressed")
+        XCTAssertEqual(emotion(.working, text: "All fine.", elapsed: 5000), .stressed)
+        XCTAssertNil(emotion(.working, text: "All fine.", elapsed: 10))
+    }
+
+    func testStatusTimerRestartsWhenTheStatusChanges() {
+        var timer = CompanionStatusTimer()
+        XCTAssertEqual(timer.elapsed(now: now), 0)
+        timer.observe("working", now: now)
+        timer.observe("working", now: now.addingTimeInterval(500))
+        XCTAssertEqual(timer.elapsed(now: now.addingTimeInterval(900)), 900, "same status keeps counting")
+        timer.observe("blocked", now: now.addingTimeInterval(1000))
+        XCTAssertEqual(timer.elapsed(now: now.addingTimeInterval(1010)), 10, "a new status restarts")
+        timer.observe("working", now: now.addingTimeInterval(1100))
+        XCTAssertEqual(timer.elapsed(now: now.addingTimeInterval(1101)), 1)
+    }
+
+    func testEmotionBubblePicks() {
+        let sentences = ["First.", "Middle.", "Last."]
+        XCTAssertEqual(CompanionDialogue.pick(mood: .working, emotion: .sad, sentences: sentences), "First.")
+        XCTAssertEqual(CompanionDialogue.pick(mood: .idle, emotion: .crying, sentences: sentences), "First.")
+        XCTAssertEqual(CompanionDialogue.pick(mood: .working, emotion: .scared, sentences: sentences), "Last.")
+        XCTAssertEqual(CompanionDialogue.pick(mood: .idle, emotion: .stressed, sentences: sentences), "Last.")
+        XCTAssertEqual(CompanionDialogue.pick(mood: .waiting, emotion: .angry, sentences: ["A.", "Why?", "B."]), "Why?")
+        XCTAssertEqual(CompanionDialogue.pick(mood: .idle, emotion: nil, sentences: sentences), "First.")
+    }
+
+    func testMissingEmotionMoodFallsBackToTheBaseMood() throws {
+        let json = """
+        {"version":1,"size":[1,1],
+         "moods":{"idle":[{"dir":"i","frames":1,"fps":1,"loop":true}],"sad":[{"dir":"s","frames":1,"fps":1,"loop":true}]},
+         "skins":{"streamer":{"label":"S","moods":{"idle":[{"dir":"si","frames":1,"fps":1,"loop":true}]}},
+                  "dark_angel":{"label":"D","moods":{"idle":[{"dir":"di","frames":1,"fps":1,"loop":true}],
+                                                     "scared":[{"dir":"ds","frames":1,"fps":1,"loop":true}]}}}}
+        """
+        let manifest = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8)))
+        XCTAssertTrue(manifest.hasOwnSequences(forKey: "sad", skin: "ame"))
+        XCTAssertTrue(manifest.hasOwnSequences(forKey: "sad", skin: nil))
+        XCTAssertFalse(manifest.hasOwnSequences(forKey: "crying", skin: "ame"))
+        XCTAssertFalse(manifest.hasOwnSequences(forKey: "sad", skin: "streamer"), "the skin has no sad of its own")
+        XCTAssertTrue(manifest.hasOwnSequences(forKey: "scared", skin: "dark_angel"))
+        XCTAssertFalse(manifest.hasOwnSequences(forKey: "scared", skin: "streamer"))
+    }
+
+    func testTranscriptTailCarriesTheNewestAssistantTime() throws {
+        let data = Data((record("assistant", [["type": "text", "text": "Old."]]) + "\n"
+            + rawRecord(["type": "assistant", "timestamp": "2026-11-07T10:00:05Z",
+                         "message": ["content": [["type": "text", "text": "Newest."]]]])).utf8)
+        let latest = try XCTUnwrap(CompanionDialogue.latestAssistant(inTail: data, startsMidFile: false))
+        XCTAssertEqual(latest.text, "Newest.")
+        XCTAssertNotNil(latest.time)
+    }
 }
