@@ -760,4 +760,139 @@ final class CompanionTests: XCTestCase {
                                                  imageSize: .zero, visible: nil).x, 0.25, accuracy: 0.0001,
                        "no visible bounds: the sprite_rect center")
     }
+
+    // MARK: Side chat with Ame
+
+    private var utc: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    private func date(_ hour: Int, _ minute: Int = 0, day: Int = 3) -> Date {
+        utc.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute))!
+    }
+
+    private func isolatedDefaults() throws -> (UserDefaults, () -> Void) {
+        let suite = "CompanionNudgeTests-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        return (defaults, { defaults.removePersistentDomain(forName: suite) })
+    }
+
+    func testNudgeTextAndHints() {
+        // 2026-11-03 is a Tuesday.
+        XCTAssertEqual(CompanionNudge.text(now: date(15, 5), hint: "everything is quiet", calendar: utc),
+                       "[nudge] it's Tuesday 3:05 PM; everything is quiet")
+        XCTAssertEqual(CompanionNudge.hint(commanderWorking: true, runningTasks: 0), "the commander is working")
+        XCTAssertEqual(CompanionNudge.hint(commanderWorking: false, runningTasks: 0), "everything is quiet")
+        XCTAssertEqual(CompanionNudge.hint(commanderWorking: true, runningTasks: 3), "3 tasks running")
+        XCTAssertEqual(CompanionNudge.hint(commanderWorking: false, runningTasks: 1), "1 task running")
+    }
+
+    func testNudgeQuietHours() {
+        XCTAssertFalse(CompanionNudge.isQuiet(date(0, 59), calendar: utc))
+        XCTAssertTrue(CompanionNudge.isQuiet(date(1), calendar: utc))
+        XCTAssertTrue(CompanionNudge.isQuiet(date(8, 59), calendar: utc))
+        XCTAssertFalse(CompanionNudge.isQuiet(date(9), calendar: utc))
+    }
+
+    func testSchedulerWaitsARandomDelayThenSendsOnceWhenIdle() throws {
+        let (defaults, cleanup) = try isolatedDefaults()
+        defer { cleanup() }
+        var scheduler = CompanionNudgeScheduler()
+        let delay: (ClosedRange<TimeInterval>) -> TimeInterval = { $0.lowerBound }
+        XCTAssertFalse(scheduler.due(now: date(10), ameIsIdle: true, calendar: utc, defaults: defaults, random: delay),
+                       "the first look only schedules")
+        XCTAssertEqual(scheduler.nextFire, date(10).addingTimeInterval(45 * 60))
+        XCTAssertFalse(scheduler.due(now: date(10, 44), ameIsIdle: true, calendar: utc, defaults: defaults, random: delay))
+        XCTAssertFalse(scheduler.due(now: date(10, 46), ameIsIdle: false, calendar: utc, defaults: defaults, random: delay),
+                       "a busy Ame waits")
+        XCTAssertEqual(scheduler.nextFire, date(10).addingTimeInterval(45 * 60), "and the time stays due")
+        XCTAssertTrue(scheduler.due(now: date(10, 50), ameIsIdle: true, calendar: utc, defaults: defaults, random: delay))
+        XCTAssertFalse(scheduler.due(now: date(10, 51), ameIsIdle: true, calendar: utc, defaults: defaults, random: delay))
+        XCTAssertEqual(scheduler.nextFire, date(10, 50).addingTimeInterval(45 * 60))
+        XCTAssertEqual(defaults.integer(forKey: CompanionNudgeScheduler.countKey), 1)
+    }
+
+    func testSchedulerSkipsQuietHoursAndStopsAtTheDailyLimit() throws {
+        let (defaults, cleanup) = try isolatedDefaults()
+        defer { cleanup() }
+        let delay: (ClosedRange<TimeInterval>) -> TimeInterval = { $0.upperBound }
+        var scheduler = CompanionNudgeScheduler()
+        _ = scheduler.due(now: date(0, 30), ameIsIdle: true, calendar: utc, defaults: defaults, random: delay)
+        XCTAssertFalse(scheduler.due(now: date(3), ameIsIdle: true, calendar: utc, defaults: defaults, random: delay),
+                       "03:00 is quiet")
+        XCTAssertEqual(defaults.integer(forKey: CompanionNudgeScheduler.countKey), 0)
+        XCTAssertEqual(scheduler.nextFire, date(3).addingTimeInterval(150 * 60), "moved on instead")
+
+        defaults.set(CompanionNudge.dayKey(date(12), calendar: utc), forKey: CompanionNudgeScheduler.dayKey)
+        defaults.set(CompanionNudge.maximumPerDay, forKey: CompanionNudgeScheduler.countKey)
+        scheduler = CompanionNudgeScheduler()
+        _ = scheduler.due(now: date(11), ameIsIdle: true, calendar: utc, defaults: defaults, random: { $0.lowerBound })
+        XCTAssertFalse(scheduler.due(now: date(12), ameIsIdle: true, calendar: utc, defaults: defaults, random: { $0.lowerBound }),
+                       "8 a day at most")
+        // The next local day starts again at zero.
+        scheduler = CompanionNudgeScheduler()
+        _ = scheduler.due(now: date(11, day: 4), ameIsIdle: true, calendar: utc, defaults: defaults, random: { $0.lowerBound })
+        XCTAssertTrue(scheduler.due(now: date(12, day: 4), ameIsIdle: true, calendar: utc, defaults: defaults, random: { $0.lowerBound }))
+        XCTAssertEqual(defaults.integer(forKey: CompanionNudgeScheduler.countKey), 1)
+    }
+
+    func testNudgesAreHiddenFromTheChat() {
+        let messages = [
+            CompanionMessage(role: .user, text: "[nudge] it's Tuesday 3:05 PM; everything is quiet", time: date(15)),
+            CompanionMessage(role: .assistant, text: "hi!", time: date(15, 1)),
+            CompanionMessage(role: .user, text: "  [nudge] padded", time: date(16)),
+            CompanionMessage(role: .user, text: "what is a [nudge]?", time: date(17)),
+            CompanionMessage(role: .assistant, text: "[nudge] from her stays", time: date(17, 1)),
+        ]
+        XCTAssertEqual(CompanionNudge.visible(messages).map(\.text), ["hi!", "what is a [nudge]?", "[nudge] from her stays"])
+    }
+
+    func testUnreadCountsOnlyWhileOutOfSightAndClearsWhenSeen() {
+        var unread = CompanionUnread()
+        unread.update(assistantTimes: [date(9), date(10)], visible: false)
+        XCTAssertEqual(unread.count, 0, "what is there at first counts as read")
+        unread.update(assistantTimes: [date(9), date(10), date(11)], visible: false)
+        XCTAssertEqual(unread.count, 1)
+        unread.update(assistantTimes: [date(9), date(10), date(11), date(12)], visible: false)
+        XCTAssertEqual(unread.count, 2)
+        unread.update(assistantTimes: [date(9), date(10), date(11), date(12)], visible: true)
+        XCTAssertEqual(unread.count, 0, "expanded in the key window")
+        unread.update(assistantTimes: [date(9), date(10), date(11), date(12)], visible: false)
+        XCTAssertEqual(unread.count, 0, "nothing new")
+        unread.update(assistantTimes: [date(12), date(13)], visible: false)
+        XCTAssertEqual(unread.count, 1)
+
+        var empty = CompanionUnread()
+        empty.update(assistantTimes: [], visible: false)
+        empty.update(assistantTimes: [date(8)], visible: false)
+        XCTAssertEqual(empty.count, 1, "the first text after an empty chat is unread")
+    }
+
+    func testLoveFromTheUserMessagesToAme() {
+        let messages = [
+            CompanionMessage(role: .user, text: "hello", time: date(10)),
+            CompanionMessage(role: .user, text: "LOVE", time: date(11)),
+            CompanionMessage(role: .assistant, text: "love you too", time: date(11, 1)),
+            CompanionMessage(role: .user, text: "ok", time: date(12)),
+        ]
+        XCTAssertEqual(CompanionAffection.newestLove(in: messages, extra: ["LOVE"]), date(11),
+                       "her own reply and later plain messages do not count")
+        XCTAssertNil(CompanionAffection.newestLove(in: [messages[0], messages[2]]))
+        XCTAssertEqual(CompanionAffection.later(date(10), date(11)), date(11))
+        XCTAssertEqual(CompanionAffection.later(nil, date(11)), date(11))
+        XCTAssertNil(CompanionAffection.later(nil, nil))
+        let signals = CompanionTextSignals()
+        XCTAssertEqual(CompanionEmotionRules.resolve(mood: .idle, signals: signals, textTime: nil, statusElapsed: 0,
+                                                      now: date(11, 3), loveTime: date(11)), .love)
+    }
+
+    func testAmeIsFoundByNameInAnySpace() throws {
+        let json = #"{"pane_id":"w2:p9","workspace_id":"w2","agent":"claude","name":"Ame","agent_status":"idle"}"#
+        let ame = try JSONDecoder().decode(HerdrAgent.self, from: Data(json.utf8))
+        let other = try JSONDecoder().decode(HerdrAgent.self, from: Data(json.replacingOccurrences(of: "Ame", with: "amelia").utf8))
+        XCTAssertEqual(CompanionMood.ame(in: [other, ame])?.paneID, "w2:p9")
+        XCTAssertNil(CompanionMood.ame(in: [other]))
+    }
 }

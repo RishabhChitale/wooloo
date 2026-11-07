@@ -22,6 +22,11 @@ enum CompanionMood: String, CaseIterable, Sendable {
     }
 
     /// The agent named "commander" or "commander-…" in the Space.
+    /// The side-chat agent named "ame", in any Space.
+    static func ame(in agents: [HerdrAgent]) -> HerdrAgent? {
+        agents.first { ($0.name ?? $0.displayAgent)?.lowercased() == "ame" }
+    }
+
     static func commander(in agents: [HerdrAgent], workspaceID: String?) -> HerdrAgent? {
         agents.first { agent in
             guard agent.workspaceID == workspaceID, let name = (agent.name ?? agent.displayAgent)?.lowercased()
@@ -358,6 +363,19 @@ enum CompanionAffection {
         }
     }
 
+    /// When the newest affectionate message of the user was sent, among `messages`.
+    static func newestLove(in messages: [CompanionMessage], extra: [String] = []) -> Date? {
+        messages.filter { $0.role == .user && matches($0.text, extra: extra) }.compactMap(\.time).max()
+    }
+
+    /// The later of two love times.
+    static func later(_ a: Date?, _ b: Date?) -> Date? {
+        switch (a, b) {
+        case let (a?, b?): return max(a, b)
+        default: return a ?? b
+        }
+    }
+
     /// ♥ ♡ ❤ ❣ and the heart emoji (not the broken heart).
     private static func isHeart(_ scalar: Unicode.Scalar) -> Bool {
         switch scalar.value {
@@ -665,7 +683,7 @@ actor CompanionTranscriptReader {
         return CompanionTranscriptSnapshot(
             text: latest?.text, textTime: latest?.time,
             userText: newestUser?.text, userTime: newestUser?.time,
-            messages: CompanionDialogue.messages(inTail: data, startsMidFile: offset > 0))
+            messages: CompanionDialogue.messages(inTail: data, startsMidFile: offset > 0, limit: 24))
     }
 }
 /// Decoded frames, which `CompanionModel` keeps for the sequences it has played.
@@ -685,7 +703,19 @@ final class CompanionModel: ObservableObject {
     @Published private(set) var emotion: CompanionEmotion?
     private var signals = CompanionTextSignals()
     private var textTime: Date?
-    private var loveTime: Date?
+    private var commanderLoveTime: Date?
+    private var ameLoveTime: Date?
+    /// The newest affectionate message of the user to the commander or to Ame.
+    private var loveTime: Date? { CompanionAffection.later(commanderLoveTime, ameLoveTime) }
+    private let ameReader = CompanionTranscriptReader()
+    private var ameSession: String?
+    private var ameRequested = Date.distantPast
+    private var ameInFlight = false
+    private var unread = CompanionUnread()
+    private var jineVisible = false
+    private var nudges = CompanionNudgeScheduler()
+    /// How many texts of Ame arrived while the JINE box was out of sight.
+    @Published private(set) var unreadCount = 0
     private var statusTimer = CompanionStatusTimer()
     /// Single images of the companion folder (scene, activity icons, stickers), by relative path.
     @Published private(set) var images: [String: CGImage] = [:]
@@ -762,10 +792,9 @@ final class CompanionModel: ObservableObject {
             dialogueSession = sessionID
             dialogueRequested = .distantPast
             if !sentences.isEmpty { sentences = [] }
-            if !messages.isEmpty { messages = [] }
             signals = CompanionTextSignals()
             textTime = nil
-            loveTime = nil
+            commanderLoveTime = nil
         }
         guard let sessionID, !dialogueInFlight,
               now.timeIntervalSince(dialogueRequested) >= CompanionTranscriptReader.minimumInterval else { return }
@@ -778,12 +807,62 @@ final class CompanionModel: ObservableObject {
             guard self.dialogueSession == sessionID else { return }
             let next = snapshot.text.map { CompanionDialogue.sentences(fromMarkdown: $0) } ?? []
             if next != self.sentences { self.sentences = next }
-            if snapshot.messages != self.messages { self.messages = snapshot.messages }
             self.signals = CompanionTextSignals(text: snapshot.text)
             self.textTime = snapshot.textTime
             let loveLabels = (self.manifest?.stickers ?? []).filter { $0.id == "love" }.map(\.label)
-            self.loveTime = CompanionAffection.matches(snapshot.userText, extra: loveLabels) ? snapshot.userTime : nil
+            self.commanderLoveTime = CompanionAffection.matches(snapshot.userText, extra: loveLabels) ? snapshot.userTime : nil
         }
+    }
+
+    /// Reads Ame's transcript for the JINE box: her texts and the user's messages, without nudges.
+    func refreshAme(sessionID: String?, now: Date = Date()) {
+        if sessionID != ameSession {
+            ameSession = sessionID
+            ameRequested = .distantPast
+            if !messages.isEmpty { messages = [] }
+            ameLoveTime = nil
+            unread = CompanionUnread()
+            if unreadCount != 0 { unreadCount = 0 }
+        }
+        guard let sessionID, !ameInFlight,
+              now.timeIntervalSince(ameRequested) >= CompanionTranscriptReader.minimumInterval else { return }
+        ameRequested = now
+        ameInFlight = true
+        let reader = ameReader
+        Task {
+            let snapshot = await reader.snapshot(sessionID: sessionID)
+            self.ameInFlight = false
+            guard self.ameSession == sessionID else { return }
+            let shown = CompanionNudge.visible(snapshot.messages)
+            let next = Array(shown.suffix(4))
+            if next != self.messages { self.messages = next }
+            let loveLabels = (self.manifest?.stickers ?? []).filter { $0.id == "love" }.map(\.label)
+            self.ameLoveTime = CompanionAffection.newestLove(in: shown, extra: loveLabels)
+            self.updateUnread()
+        }
+    }
+
+    /// Whether the JINE box is expanded in the key window; reading clears the unread count.
+    func setJineVisible(_ visible: Bool) {
+        jineVisible = visible
+        updateUnread()
+    }
+
+    private func updateUnread() {
+        unread.update(assistantTimes: messages.filter { $0.role == .assistant }.compactMap(\.time), visible: jineVisible)
+        if unread.count != unreadCount { unreadCount = unread.count }
+    }
+
+    /// Called often: sends a nudge to Ame when one is due. Never logs or keeps the text.
+    func tickNudge(now: Date, ame: HerdrAgent?, commanderStatus: String?, store: HerdrStore) {
+        guard manifest != nil, let ame, store.isConnected else { return }
+        let idle = CompanionMood(agentStatus: ame.agentStatus) == .idle
+        guard nudges.due(now: now, ameIsIdle: idle) else { return }
+        let hint = CompanionNudge.hint(commanderWorking: CompanionMood(agentStatus: commanderStatus) == .working,
+                                       runningTasks: ActiveTasks.loadTasks().count)
+        guard let params = CompanionMessage.promptParams(paneID: ame.paneID, text: CompanionNudge.text(now: now, hint: hint))
+        else { return }
+        Task { try? await store.sendAgentPrompt(params) }
     }
 
     /// Sends a message to the commander through Herdr; false when it cannot be sent. The text is
@@ -871,6 +950,9 @@ enum CompanionFontLoader {
 struct CompanionView: View {
     @ObservedObject var model: CompanionModel
     let commander: HerdrAgent?
+    /// The "ame" agent whose side chat the JINE box shows; the room itself keeps the commander.
+    var ame: HerdrAgent?
+    var store: HerdrStore?
     /// The sidebar's width; the room is 0.75 times as tall.
     let width: CGFloat
     @AppStorage(CompanionPreferences.activityKey) private var activityID = CompanionPreferences.defaultActivity
@@ -897,6 +979,8 @@ struct CompanionView: View {
             .onChange(of: context.date) { _, date in
                 model.advance(now: date, mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus)
                 model.refreshDialogue(sessionID: commander?.agentSessionID, now: date)
+                model.refreshAme(sessionID: ame?.agentSessionID, now: date)
+                if let store { model.tickNudge(now: date, ame: ame, commanderStatus: commander?.agentStatus, store: store) }
             }
             .onChange(of: mood) { _, mood in model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus) }
             .onChange(of: activityID) { _, id in model.advance(now: Date(), mood: mood, activityID: id, skin: skin, status: commander?.agentStatus) }
@@ -1093,5 +1177,102 @@ enum CompanionSprite {
         return CGRect(x: Double(minX) / Double(width), y: Double(minY) / Double(height),
                       width: Double(maxX - minX + 1) / Double(width),
                       height: Double(maxY - minY + 1) / Double(height))
+    }
+}
+
+// MARK: Side chat with Ame
+
+/// The random texts the app sends to the "ame" agent, and which messages the JINE box hides.
+enum CompanionNudge {
+    static let prefix = "[nudge]"
+    /// Seconds between two nudges, drawn at random.
+    static let delayRange: ClosedRange<TimeInterval> = (45 * 60)...(150 * 60)
+    /// Local hours in which nothing is sent: 01:00 up to 09:00.
+    static let quietHours = 1..<9
+    static let maximumPerDay = 8
+
+    static func isNudge(_ text: String) -> Bool {
+        text.drop(while: { $0.isWhitespace }).hasPrefix(prefix)
+    }
+
+    /// Without the user messages that are nudges.
+    static func visible(_ messages: [CompanionMessage]) -> [CompanionMessage] {
+        messages.filter { !($0.role == .user && isNudge($0.text)) }
+    }
+
+    static func isQuiet(_ date: Date, calendar: Calendar = .current) -> Bool {
+        quietHours.contains(calendar.component(.hour, from: date))
+    }
+
+    static func dayKey(_ date: Date, calendar: Calendar = .current) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return "\(parts.year ?? 0)-\(parts.month ?? 0)-\(parts.day ?? 0)"
+    }
+
+    static func hint(commanderWorking: Bool, runningTasks: Int) -> String {
+        if runningTasks > 0 { return runningTasks == 1 ? "1 task running" : "\(runningTasks) tasks running" }
+        return commanderWorking ? "the commander is working" : "everything is quiet"
+    }
+
+    /// "[nudge] it's Tuesday 3:05 PM; everything is quiet"
+    static func text(now: Date, hint: String, calendar: Calendar = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "EEEE h:mm a"
+        return "\(prefix) it's \(formatter.string(from: now)); \(hint)"
+    }
+}
+
+/// When the next nudge is due. The count per local day is kept in UserDefaults; the next time
+/// lives only while the app runs.
+struct CompanionNudgeScheduler {
+    static let dayKey = "companionNudgeDay"
+    static let countKey = "companionNudgeCount"
+
+    private(set) var nextFire: Date?
+
+    /// True once, when a nudge should go out now; this counts it and picks the next time. Out of
+    /// hours or past the daily limit the time is only moved on. A busy Ame waits, without moving it.
+    mutating func due(now: Date, ameIsIdle: Bool, calendar: Calendar = .current,
+                      defaults: UserDefaults = .standard,
+                      random: (ClosedRange<TimeInterval>) -> TimeInterval = { Double.random(in: $0) }) -> Bool {
+        guard let fire = nextFire else {
+            nextFire = now.addingTimeInterval(random(CompanionNudge.delayRange))
+            return false
+        }
+        guard now >= fire else { return false }
+        let today = CompanionNudge.dayKey(now, calendar: calendar)
+        let sent = defaults.string(forKey: Self.dayKey) == today ? defaults.integer(forKey: Self.countKey) : 0
+        if CompanionNudge.isQuiet(now, calendar: calendar) || sent >= CompanionNudge.maximumPerDay {
+            nextFire = now.addingTimeInterval(random(CompanionNudge.delayRange))
+            return false
+        }
+        guard ameIsIdle else { return false }
+        defaults.set(today, forKey: Self.dayKey)
+        defaults.set(sent + 1, forKey: Self.countKey)
+        nextFire = now.addingTimeInterval(random(CompanionNudge.delayRange))
+        return true
+    }
+}
+
+/// How many of Ame's texts arrived while the JINE box was out of sight.
+struct CompanionUnread: Equatable {
+    private var seen: Date?
+    private var primed = false
+    private(set) var count = 0
+
+    /// `assistantTimes` are the send times of her texts in the transcript. What is there the first
+    /// time is taken as read.
+    mutating func update(assistantTimes: [Date], visible: Bool) {
+        if visible || !primed {
+            count = 0
+            seen = assistantTimes.max() ?? seen
+            primed = true
+            return
+        }
+        guard let seen else { count = assistantTimes.count; return }
+        count = assistantTimes.filter { $0 > seen }.count
     }
 }

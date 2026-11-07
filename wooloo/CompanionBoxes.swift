@@ -91,11 +91,15 @@ enum CompanionFont {
 struct CompanionBox<Content: View>: View {
     let title: String
     let fontName: String?
+    /// Unread items, shown as a pink dot and a count on the title bar when above zero.
+    let unread: Int
     @Binding var collapsed: Bool
     let content: Content
     @Environment(\.woolooTypography) private var typography
 
-    init(title: String, fontName: String?, collapsed: Binding<Bool>, @ViewBuilder content: () -> Content) {
+    init(title: String, fontName: String?, unread: Int = 0, collapsed: Binding<Bool>,
+         @ViewBuilder content: () -> Content) {
+        self.unread = unread
         self.title = title
         self.fontName = fontName
         _collapsed = collapsed
@@ -109,6 +113,15 @@ struct CompanionBox<Content: View>: View {
                 Text(title)
                     .font(CompanionFont.font(fontName, size: typography.secondary))
                     .foregroundStyle(CompanionPalette.indigo)
+                if unread > 0 {
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.pink).frame(width: 7, height: 7)
+                        Text("\(unread)")
+                            .font(CompanionFont.font(fontName, size: typography.caption))
+                            .foregroundStyle(Color.pink)
+                    }
+                    .accessibilityLabel("\(unread) unread")
+                }
                 Spacer(minLength: 0)
                 Button { collapsed.toggle() } label: {
                     Text(collapsed ? "+" : "x")
@@ -285,27 +298,34 @@ struct CompanionActivitiesBox: View {
     }
 }
 
-/// The commander's last messages, her face and stickers, and a field to write to the commander.
-/// Sending goes to the commander agent of the selected Space through Herdr.
+/// The side chat with Ame: her last texts and the user's, her face and stickers, and a field to
+/// write to her. Sending goes to the agent named "ame" (in any Space) through Herdr.
 struct CompanionJineBox: View {
     @ObservedObject var model: CompanionModel
-    let commander: HerdrAgent?
+    let ame: HerdrAgent?
     let store: HerdrStore
+    @Environment(\.controlActiveState) private var controlActiveState
     @AppStorage(CompanionPreferences.jineCollapsedKey) private var collapsed = false
     @State private var draft = ""
     @State private var sending = false
     @Environment(\.woolooTypography) private var typography
 
-    private var canSend: Bool { commander != nil && store.isConnected && !sending }
+    private var canSend: Bool { ame != nil && store.isConnected && !sending }
 
     var body: some View {
         if let manifest = model.manifest {
-            CompanionBox(title: "JINE", fontName: model.fontName, collapsed: $collapsed) {
+            CompanionBox(title: "JINE", fontName: model.fontName, unread: model.unreadCount, collapsed: $collapsed) {
                 VStack(spacing: 6) {
                     messagePanel
                     HStack(spacing: 6) {
                         face(manifest)
                         stickerStrip(manifest.stickers)
+                    }
+                    if ame == nil {
+                        Text("Ame-chan is offline")
+                            .font(CompanionFont.font(model.fontName, size: typography.caption))
+                            .foregroundStyle(CompanionPalette.indigo.opacity(0.7))
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     composer
                     if let error = model.sendError {
@@ -317,7 +337,15 @@ struct CompanionJineBox: View {
                     }
                 }
             }
+            .onChange(of: collapsed) { _, _ in reportVisibility() }
+            .onChange(of: controlActiveState) { _, _ in reportVisibility() }
+            .onAppear { reportVisibility() }
+            .onDisappear { model.setJineVisible(false) }
         }
+    }
+
+    private func reportVisibility() {
+        model.setJineVisible(!collapsed && controlActiveState == .key)
     }
 
     private var messagePanel: some View {
@@ -412,6 +440,7 @@ struct CompanionJineBox: View {
                 .frame(height: typography.metric(22))
                 .background(Color.white)
                 .overlay(Rectangle().strokeBorder(CompanionPalette.indigo, lineWidth: 1))
+                .disabled(ame == nil)
                 .onSubmit { submit(draft, clearsDraft: true) }
             Button { submit(draft, clearsDraft: true) } label: {
                 Image(systemName: "paperplane.fill")
@@ -422,7 +451,7 @@ struct CompanionJineBox: View {
             }
             .buttonStyle(.plain)
             .disabled(!canSend || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .help(commander == nil ? "No commander in this Space" : "Send to the commander")
+            .help(ame == nil ? "Ame-chan is offline" : "Send to Ame-chan")
         }
         .opacity(canSend ? 1 : 0.6)
     }
@@ -432,7 +461,7 @@ struct CompanionJineBox: View {
         guard canSend, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         sending = true
         Task {
-            let sent = await model.send(text, to: commander, via: store)
+            let sent = await model.send(text, to: ame, via: store)
             sending = false
             if sent, clearsDraft, draft == text { draft = "" }
         }
@@ -455,12 +484,13 @@ struct CompanionPanel: View {
     var body: some View {
         if model.manifest != nil {
             let commander = CompanionMood.commander(in: agents, workspaceID: workspaceID)
+            let ame = CompanionMood.ame(in: agents)
             VStack(spacing: 0) {
                 ScrollView {
                     VStack(spacing: 6) {
-                        CompanionView(model: model, commander: commander, width: width - 14)
+                        CompanionView(model: model, commander: commander, ame: ame, store: store, width: width - 14)
                         CompanionActivitiesBox(model: model)
-                        CompanionJineBox(model: model, commander: commander, store: store)
+                        CompanionJineBox(model: model, ame: ame, store: store)
                     }
                     .padding(7)
                     .background {
