@@ -263,6 +263,9 @@ struct ContentCommands {
             effects.reloadAppConfig()
             herdr.reloadConfig()
         case .toggleFilesSidebar: window.showsFilesSidebar.toggle()
+        case .toggleFileExplorer:
+            let defaults = UserDefaults.standard
+            defaults.set(!defaults.bool(forKey: "filesSidebarShowsExplorer"), forKey: "filesSidebarShowsExplorer")
         case .toggleWrapLines: effects.toggleLineWrapping()
         case .refreshFiles:
             effects.forgetRecentFileResults()

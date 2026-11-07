@@ -25,6 +25,8 @@ struct WorkspaceBrowserView: View {
     var commandTarget: ExplorerCommandTarget?
     /// Used only to mark worktrees that already have a Space; never determines file location.
     var spaces: [HerdrWorkspace] = []
+    /// The explorer pane above the GitHub panel; without it GitHub fills the sidebar.
+    var showsExplorer = true
     @State private var commandToken = UUID()
 
     /// Not private so snapshot tests can open folders and select a row before it appears.
@@ -56,7 +58,9 @@ struct WorkspaceBrowserView: View {
     var body: some View {
         Group {
             // A collapsed GitHub panel leaves the available height to Explorer.
-            if githubCollapsed {
+            if !showsExplorer {
+                WorkspaceGitHubView(location: location, isCollapsed: .constant(false), model: githubModel)
+            } else if githubCollapsed {
                 VStack(spacing: 0) {
                     explorer.frame(maxHeight: .infinity)
                     Divider()

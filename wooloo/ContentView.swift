@@ -75,6 +75,7 @@ private struct DestinationContentView: View {
     @AppStorage("FilesSidebarWidth") private var filesSidebarWidth = 244.0
     @AppStorage("AgentsInSelectedSpaceOnly") private var agentsInSelectedSpaceOnly = false
     @State private var followsHerdrAgentView = true
+    @AppStorage("filesSidebarShowsExplorer") private var showsExplorer = false
     @State private var spacesContentHeight: CGFloat = 0
     @State private var connectionRequest = UUID()
     @State private var popupDocument: (session: String, space: String?, tab: String?, document: String)?
@@ -341,6 +342,19 @@ private struct DestinationContentView: View {
                     CompanionView(agents: herdr.snapshot?.agents ?? [], workspaceID: herdr.selectedWorkspaceID,
                                   width: filesSidebarWidth)
                     filesSidebarSpaces
+                    HStack {
+                        Spacer()
+                        Button { showsExplorer.toggle() } label: {
+                            Label("Files", systemImage: "folder")
+                                .font(.system(size: typography.secondary, weight: showsExplorer ? .semibold : .regular))
+                                .foregroundStyle(showsExplorer ? theme.accent : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(showsExplorer ? "Hide the file explorer" : "Show the file explorer")
+                        .accessibilityIdentifier("toggle-file-explorer")
+                    }
+                    .padding(.horizontal, 11)
+                    .frame(height: typography.metric(24))
                     Divider()
                     WorkspaceBrowserView(location: explorerLocation,
                                      machine: explorerMachine,
@@ -381,7 +395,8 @@ private struct DestinationContentView: View {
                                          openDocument(.change, path: path, at: location, scope: scope)
                                      },
                                      commandTarget: window.explorer,
-                                     spaces: herdr.snapshot?.workspaces ?? [])
+                                     spaces: herdr.snapshot?.workspaces ?? [],
+                                     showsExplorer: showsExplorer)
                 }
                 .frame(width: filesSidebarWidth)
             }

@@ -203,33 +203,33 @@ struct CompanionView: View {
     var body: some View {
         Group {
             if model.manifest != nil {
-                VStack(spacing: 0) {
                 let commander = CompanionMood.commander(in: agents, workspaceID: workspaceID)
                 let mood = CompanionMood(agentStatus: commander?.agentStatus)
-                TimelineView(.animation(minimumInterval: 1 / (model.player.sequence?.fps ?? 10))) { context in
-                    VStack(spacing: 6) {
-                        Group {
-                            if let image = model.image(at: context.date) {
-                                Image(decorative: image, scale: 1)
-                                    .interpolation(.none)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                            } else {
-                                Color.clear
+                VStack(spacing: 0) {
+                    TimelineView(.animation(minimumInterval: 1 / (model.player.sequence?.fps ?? 10))) { context in
+                        VStack(spacing: 6) {
+                            Group {
+                                if let image = model.image(at: context.date) {
+                                    Image(decorative: image, scale: 1)
+                                        .interpolation(.none)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                } else {
+                                    Color.clear
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            if let text = model.player.bubbleText(title: commander?.terminalTitleStripped) {
+                                CompanionBubble(text: text)
                             }
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        if let text = model.player.bubbleText(title: commander?.terminalTitleStripped) {
-                            CompanionBubble(text: text)
-                        }
+                        .onChange(of: context.date) { _, date in model.advance(now: date, mood: mood) }
+                        .onChange(of: mood) { _, mood in model.advance(now: Date(), mood: mood) }
+                        .onAppear { model.advance(now: Date(), mood: mood) }
                     }
-                    .onChange(of: context.date) { _, date in model.advance(now: date, mood: mood) }
-                    .onChange(of: mood) { _, mood in model.advance(now: Date(), mood: mood) }
-                    .onAppear { model.advance(now: Date(), mood: mood) }
-                }
-                .padding(7)
-                .frame(height: width * 0.9)
-                Divider()
+                    .padding(7)
+                    .frame(height: width * 0.9)
+                    Divider()
                 }
             }
         }
