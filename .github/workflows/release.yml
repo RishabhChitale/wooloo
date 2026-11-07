@@ -10,9 +10,19 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # A tag pushed with GITHUB_TOKEN starts no workflow, so the sync workflow runs this by hand.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build (vX.Y.Z or vX.Y.Z.N), which must already exist
+        required: true
+        type: string
 
 permissions:
   contents: read
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 concurrency:
   group: release
@@ -29,19 +39,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
           persist-credentials: false
 
       # Sparkle compares CFBundleVersion, which follows MARKETING_VERSION and must stay numeric.
       - name: Check the version
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${TAG#v}
           if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
-            echo "::error::Release tags look like v1.2.3 or v1.2.3.4, not $GITHUB_REF_NAME"
+            echo "::error::Release tags look like v1.2.3 or v1.2.3.4, not $TAG"
             exit 1
           fi
           marketing=$(sed -n 's/.*MARKETING_VERSION = \(.*\);/\1/p' wooloo.xcodeproj/project.pbxproj | sort -u)
           if [ "$marketing" != "$version" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match MARKETING_VERSION ($marketing)"
+            echo "::error::Tag $TAG does not match MARKETING_VERSION ($marketing)"
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
@@ -51,14 +62,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...main" --jq .status)
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$(git rev-parse HEAD)...main" --jq .status)
           if [ "$status" != ahead ] && [ "$status" != identical ]; then
-            echo "::error::$GITHUB_REF_NAME is not on main"
+            echo "::error::$TAG is not on main"
             exit 1
           fi
           # A PR's required check can pass without macOS for docs-only changes.
           # Require actual tests from a successful main push of this exact commit.
-          python3 scripts/ci_policy.py release
+          GITHUB_SHA=$(git rev-parse HEAD) python3 scripts/ci_policy.py release
 
       - name: Select Xcode 26
         run: |
@@ -136,10 +147,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
           persist-credentials: false
 
       - name: Set the version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        run: echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
 
       - uses: actions/download-artifact@v7
         with:
@@ -156,10 +168,10 @@ jobs:
       # The Keychain note goes into the update dialog too, since updating is what triggers it.
       - name: Release notes
         run: |
-          if [ -f "docs/releases/$GITHUB_REF_NAME.md" ]; then
-            cp "docs/releases/$GITHUB_REF_NAME.md" build/release/notes.md
+          if [ -f "docs/releases/$TAG.md" ]; then
+            cp "docs/releases/$TAG.md" build/release/notes.md
           else
-            gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" \
+            gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" \
               --jq .body > build/release/notes.md
           fi
           {
@@ -178,7 +190,7 @@ jobs:
             exit 1
           fi
           scripts/release-appcast.sh "build/release/wooloo-$VERSION.zip" build/release/notes.md \
-            "$GITHUB_REF_NAME" build/release
+            "$TAG" build/release
 
       - name: Publish
         run: |
@@ -205,6 +217,6 @@ jobs:
           else
             make_latest=false
           fi
-          gh release create "$GITHUB_REF_NAME" "build/release/$archive" build/release/appcast.xml \
+          gh release create "$TAG" "build/release/$archive" build/release/appcast.xml \
             "build/release/wooloo-$VERSION.dSYM.zip" \
             --verify-tag --title "wooloo $VERSION" --notes-file build/release/body.md --latest="$make_latest"
