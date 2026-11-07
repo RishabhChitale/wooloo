@@ -1,0 +1,149 @@
+name: Upstream sync
+
+# Daily: merge the newest upstream release tag (rarce/wooloo vX.Y.Z) into main, bump the version to
+# X.Y.Z.1, test it with CI, then tag vX.Y.Z.1 and publish it with the Release workflow. A merge
+# conflict or a failing CI run opens an issue instead. Pushes made with GITHUB_TOKEN start no
+# workflows, so CI and Release are started with workflow_dispatch. See docs/FORK.md.
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  UPSTREAM: https://github.com/rarce/wooloo
+
+jobs:
+  sync:
+    name: Merge latest upstream release
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Find the latest upstream release
+        id: upstream
+        run: |
+          git remote add upstream "$UPSTREAM"
+          git fetch --no-tags upstream 'refs/tags/v*:refs/upstream-tags/*'
+          tag=$(git for-each-ref --format='%(refname:strip=2)' refs/upstream-tags \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          if [ -z "$tag" ]; then
+            echo "No upstream release tags found."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # refs/upstream-tags/vX.Y.Z is the commit upstream tagged, not a tag object we keep.
+          if git merge-base --is-ancestor "refs/upstream-tags/$tag" HEAD; then
+            echo "main already contains upstream $tag."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "needed=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Merge upstream into main
+        id: merge
+        if: steps.upstream.outputs.needed == 'true'
+        env:
+          TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git merge --no-ff -m "Merge upstream $TAG" "refs/upstream-tags/$TAG"; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only --diff-filter=U)
+          git merge --abort
+          echo "conflict=true" >> "$GITHUB_OUTPUT"
+          title="Upstream $TAG needs a manual merge"
+          {
+            echo "Merging upstream \`$TAG\` ($UPSTREAM) into \`main\` conflicts in:"
+            echo
+            printf '%s\n' "$files" | sed 's/^/- `/; s/$/`/'
+            echo
+            echo "Merge it by hand (\`git merge $TAG\` from the upstream remote), resolve the conflicts, set MARKETING_VERSION to ${TAG#v}.1, and push. See docs/FORK.md."
+          } > body.md
+          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
+            --jq "map(select(.title == \"$title\"))[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file body.md
+          else
+            gh issue create --title "$title" --body-file body.md
+          fi
+
+      - name: Bump the version and push main
+        id: push
+        if: steps.merge.outputs.conflict == 'false'
+        env:
+          VERSION: ${{ steps.upstream.outputs.version }}
+        run: |
+          sed -i.bak -E "s/MARKETING_VERSION = [0-9.]+;/MARKETING_VERSION = $VERSION.1;/" wooloo.xcodeproj/project.pbxproj
+          rm -f wooloo.xcodeproj/project.pbxproj.bak
+          git add wooloo.xcodeproj/project.pbxproj
+          git commit -m "Set version $VERSION.1"
+          git push origin HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Run CI on the merged main
+        id: ci
+        if: steps.push.outcome == 'success'
+        env:
+          SHA: ${{ steps.push.outputs.sha }}
+          TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          gh workflow run ci.yml --ref main
+          run_id=
+          for _ in $(seq 1 30); do
+            sleep 10
+            run_id=$(gh run list --workflow ci.yml --branch main --event workflow_dispatch \
+              --json databaseId,headSha --jq "map(select(.headSha == \"$SHA\"))[0].databaseId // empty")
+            [ -n "$run_id" ] && break
+          done
+          if [ -z "$run_id" ]; then
+            echo "CI run did not start" >&2
+            ok=false
+          elif gh run watch "$run_id" --exit-status; then
+            ok=true
+          else
+            ok=false
+          fi
+          if [ "$ok" = true ]; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+          title="CI failed after merging upstream $TAG"
+          body="CI on main at $SHA failed after merging upstream \`$TAG\`${run_id:+: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run_id}. No release was made. Fix main, then run the Upstream sync workflow again or tag by hand (see docs/FORK.md)."
+          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
+            --jq "map(select(.title == \"$title\"))[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
+
+      - name: Tag and release
+        if: steps.ci.outputs.passed == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.upstream.outputs.tag }}
+          SHA: ${{ steps.push.outputs.sha }}
+        run: |
+          release="$RELEASE_TAG.1"
+          git tag "$release" "$SHA"
+          git push origin "refs/tags/$release"
+          gh workflow run release.yml --ref main -f "tag=$release"
