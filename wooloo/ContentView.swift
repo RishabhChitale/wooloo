@@ -338,6 +338,8 @@ private struct DestinationContentView: View {
                 SidebarResizeHandle(width: $filesSidebarWidth, defaultWidth: 244, edge: .trailing,
                                     range: 200...max(200, min(560, totalWidth - left - mainMinimum)))
                 VStack(spacing: 0) {
+                    CompanionView(agents: herdr.snapshot?.agents ?? [], workspaceID: herdr.selectedWorkspaceID,
+                                  width: filesSidebarWidth)
                     filesSidebarSpaces
                     Divider()
                     WorkspaceBrowserView(location: explorerLocation,
