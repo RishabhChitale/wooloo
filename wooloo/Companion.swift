@@ -276,15 +276,17 @@ struct CompanionPlayer {
             sequenceStart = now
         }
         let linesKey = lineKey ?? newMood.rawValue
-        if moodChanged || playingLineKey != linesKey || line == nil
+        // A missing line is not retried every tick: a mood without lines simply has none.
+        if moodChanged || playingLineKey != linesKey || lineStart == .distantPast
             || now.timeIntervalSince(lineStart) >= Self.lineRotation {
             playingLineKey = linesKey
             let lines = manifest.lines(forKey: linesKey)
             let others = lines.filter { $0 != line }
             let pool = others.isEmpty ? lines : others
-            line = pool.isEmpty ? nil : pool[pick(pool.count)]
+            let next = pool.isEmpty ? nil : pool[pick(pool.count)]
+            if next != line { changed = true }
+            line = next
             lineStart = now
-            changed = true
         }
         mood = newMood
         playingKey = identity
