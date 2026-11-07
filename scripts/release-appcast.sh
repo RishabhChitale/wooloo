@@ -1,7 +1,7 @@
 #!/bin/sh
 # Write the Sparkle feed for one release: appcast.xml with a single item for the archive, its
 # release notes embedded, the archive and the feed signed with wooloo's EdDSA key. The key comes
-# from SPARKLE_PRIVATE_KEY (CI) or else from the login Keychain, account "wooloo" (generate_keys).
+# from SPARKLE_PRIVATE_KEY (CI) or else from the login Keychain, account $SPARKLE_ACCOUNT (default "wooloo-rishabh", generate_keys).
 #
 #   scripts/release-appcast.sh <wooloo-X.Y.Z.zip> <notes.md> <vX.Y.Z> <output directory>
 set -eu
@@ -56,7 +56,7 @@ set -- "$task_work/tools/bin/generate_appcast" \
 if [ -n "${SPARKLE_PRIVATE_KEY:-}" ]; then
     printf '%s' "$SPARKLE_PRIVATE_KEY" | "$@" --ed-key-file -
 else
-    "$@" --account wooloo
+    "$@" --account "${SPARKLE_ACCOUNT:-wooloo-rishabh}"
 fi
 
 # A key that does not match the app's SUPublicEDKey only prints a warning and leaves the item
