@@ -246,6 +246,11 @@ struct ContentCommands {
             guard let tabID = HerdrCommand.tab(delta, from: herdr.selectedTabID, in: tabs.map(\.tabID)) else { return }
             herdr.select(tabID: tabID)
             documents.activeID = nil
+        case .cycleSpace(let delta):
+            let spaces = herdr.snapshot?.workspaces.map(\.workspaceID) ?? []
+            guard let id = HerdrCommand.space(delta, from: herdr.selectedWorkspaceID, in: spaces) else { return }
+            herdr.select(workspaceID: id)
+            documents.activeID = nil
         case .switchTab(let number):
             guard tabs.indices.contains(number - 1) else { return }
             herdr.select(tabID: tabs[number - 1].tabID)

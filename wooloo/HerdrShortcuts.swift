@@ -43,6 +43,8 @@ enum HerdrCommand: Equatable {
     case newUntitledFile
     /// The tab `delta` places away within the Space, wrapping around.
     case cycleTab(Int)
+    /// The Space `delta` places away in the sidebar order, wrapping around.
+    case cycleSpace(Int)
     /// The Space's tab at a 1-based position.
     case switchTab(Int)
     /// Closes whatever the main panel shows: search, a document, or else the terminal tab.
@@ -82,6 +84,8 @@ enum HerdrCommand: Equatable {
         case "close_tab": self = .closeTab
         case "previous_tab": self = .cycleTab(-1)
         case "next_tab": self = .cycleTab(1)
+        case "previous_space": self = .cycleSpace(-1)
+        case "next_space": self = .cycleSpace(1)
         case "close_current_tab": self = .closeCurrentTab
         case "focus_pane_left": self = .focusPane("left")
         case "focus_pane_down": self = .focusPane("down")
@@ -123,6 +127,17 @@ enum HerdrCommand: Equatable {
         guard let index = tabs.firstIndex(where: { $0 == current }) else { return nil }
         let count = tabs.count
         return tabs[((index + delta) % count + count) % count]
+    }
+
+    /// The Space `delta` places from `current` in `spaces` (sidebar order), wrapping around. Without
+    /// a current Space the first one is chosen going forward, the last going back; nil when there
+    /// are none.
+    static func space(_ delta: Int, from current: String?, in spaces: [String]) -> String? {
+        guard !spaces.isEmpty else { return nil }
+        guard current != nil, spaces.contains(where: { $0 == current }) else {
+            return delta < 0 ? spaces.last : spaces.first
+        }
+        return tab(delta, from: current, in: spaces)
     }
 }
 

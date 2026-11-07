@@ -146,6 +146,33 @@ final class HerdrCommandTests: XCTestCase {
         XCTAssertEqual(HerdrCommand(action: "previous_tab"), .cycleTab(-1))
     }
 
+    func testSpaceActionsAreCommands() {
+        XCTAssertEqual(HerdrCommand(action: "next_space"), .cycleSpace(1))
+        XCTAssertEqual(HerdrCommand(action: "previous_space"), .cycleSpace(-1))
+    }
+
+    func testSpaceCyclingWrapsAround() {
+        let spaces = ["w1", "w2", "w3"]
+        XCTAssertEqual(HerdrCommand.space(1, from: "w1", in: spaces), "w2")
+        XCTAssertEqual(HerdrCommand.space(1, from: "w3", in: spaces), "w1")
+        XCTAssertEqual(HerdrCommand.space(-1, from: "w2", in: spaces), "w1")
+        XCTAssertEqual(HerdrCommand.space(-1, from: "w1", in: spaces), "w3")
+    }
+
+    func testSpaceCyclingWithOneOrNoSpace() {
+        XCTAssertEqual(HerdrCommand.space(1, from: "w1", in: ["w1"]), "w1")
+        XCTAssertEqual(HerdrCommand.space(-1, from: "w1", in: ["w1"]), "w1")
+        XCTAssertNil(HerdrCommand.space(1, from: nil, in: []))
+        XCTAssertNil(HerdrCommand.space(1, from: "w1", in: []))
+    }
+
+    func testSpaceCyclingWithoutAKnownCurrentSpaceStartsAtAnEnd() {
+        let spaces = ["w1", "w2", "w3"]
+        XCTAssertEqual(HerdrCommand.space(1, from: nil, in: spaces), "w1")
+        XCTAssertEqual(HerdrCommand.space(-1, from: nil, in: spaces), "w3")
+        XCTAssertEqual(HerdrCommand.space(1, from: "gone", in: spaces), "w1")
+    }
+
     func testUnknownActionsAreIgnored() {
         for action in ["", "unknown", "switch_tab_", "switch_tab_0", "switch_tab_x", "switch_tab_-1"] {
             XCTAssertNil(HerdrCommand(action: action), action)
