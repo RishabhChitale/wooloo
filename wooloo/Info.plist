@@ -36,7 +36,7 @@
 	<key>SUFeedURL</key>
 	<string>https://github.com/RishabhChitale/wooloo/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>__SPARKLE_PUBLIC_KEY__</string>
+	<string>JbEkJphBIgWG7hQdL2kmpH4m5++LGs+vRl/G61Yry70=</string>
 	<key>SURequireSignedFeed</key>
 	<true/>
 	<key>SUVerifyUpdateBeforeExtraction</key>
