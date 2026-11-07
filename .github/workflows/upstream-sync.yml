@@ -37,7 +37,7 @@ jobs:
         id: upstream
         run: |
           git remote add upstream "$UPSTREAM"
-          git fetch --no-tags upstream 'refs/tags/v*:refs/upstream-tags/*'
+          git fetch --no-tags upstream 'refs/tags/v*:refs/upstream-tags/v*'
           tag=$(git for-each-ref --format='%(refname:strip=2)' refs/upstream-tags \
             | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
           if [ -z "$tag" ]; then
