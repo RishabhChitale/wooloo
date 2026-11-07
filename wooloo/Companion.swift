@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import ImageIO
 import SwiftUI
 
@@ -45,6 +46,42 @@ struct CompanionSequence: Decodable, Equatable, Sendable {
     var duration: Double { Double(frames) / fps }
 }
 
+struct CompanionActivity: Decodable, Equatable, Sendable, Identifiable {
+    let id: String
+    let label: String
+    let icon: String
+    let mood: String?
+}
+
+struct CompanionSticker: Decodable, Equatable, Sendable, Identifiable {
+    let id: String
+    let label: String
+    let image: String
+}
+
+/// One array element that fails to decode is skipped instead of failing the whole manifest.
+private struct Lossy<Element: Decodable>: Decodable {
+    let value: Element?
+    init(from decoder: Decoder) throws { value = try? Element(from: decoder) }
+}
+
+extension CompanionManifest {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        size = try values.decode([Int].self, forKey: .size)
+        moods = try values.decode([String: [CompanionSequence]].self, forKey: .moods)
+        lines = try values.decodeIfPresent([String: [String]].self, forKey: .lines) ?? [:]
+        background = try? values.decodeIfPresent(CompanionBackground.self, forKey: .background)
+        spriteRect = try? values.decodeIfPresent([Double].self, forKey: .spriteRect)
+        activities = ((try? values.decodeIfPresent([Lossy<CompanionActivity>].self, forKey: .activities)) ?? nil)?
+            .compactMap(\.value) ?? []
+        stickers = ((try? values.decodeIfPresent([Lossy<CompanionSticker>].self, forKey: .stickers)) ?? nil)?
+            .compactMap(\.value) ?? []
+        font = try? values.decodeIfPresent(String.self, forKey: .font)
+    }
+}
+
 struct CompanionBackground: Decodable, Equatable, Sendable {
     let defaultPath: String
     let night: String?
@@ -59,7 +96,7 @@ struct CompanionBackground: Decodable, Equatable, Sendable {
     /// Paths stay inside the companion folder, like frame folders.
     var isValid: Bool { [defaultPath, night].compactMap { $0 }.allSatisfy(Self.isSafe) }
 
-    private static func isSafe(_ path: String) -> Bool {
+    static func isSafe(_ path: String) -> Bool {
         !path.isEmpty && !path.hasPrefix("/") && !path.split(separator: "/").contains("..")
     }
 }
@@ -73,9 +110,14 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
     /// sprite is fitted into. Optional: without both, only the sprite is drawn.
     let background: CompanionBackground?
     let spriteRect: [Double]?
+    /// What she does in her free time, one of which the user picks; a nil mood is not available yet.
+    let activities: [CompanionActivity]
+    let stickers: [CompanionSticker]
+    /// A pixel font file in the companion folder, used by the boxes under her.
+    let font: String?
 
     enum CodingKeys: String, CodingKey {
-        case version, size, moods, lines, background
+        case version, size, moods, lines, background, activities, stickers, font
         case spriteRect = "sprite_rect"
     }
 
@@ -106,7 +148,23 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
         }
         return CompanionManifest(version: 1, size: manifest.size, moods: usable, lines: manifest.lines,
                                  background: scene != nil && rect != nil ? scene : nil,
-                                 spriteRect: scene != nil ? rect : nil)
+                                 spriteRect: scene != nil ? rect : nil,
+                                 activities: manifest.activities.filter { CompanionBackground.isSafe($0.icon) },
+                                 stickers: manifest.stickers.filter { CompanionBackground.isSafe($0.image) },
+                                 font: manifest.font.flatMap { CompanionBackground.isSafe($0) ? $0 : nil })
+    }
+
+    /// The sequences of a mood or of an activity's mood ("game", "stream_watch"…).
+    func sequences(forKey key: String) -> [CompanionSequence] { moods[key] ?? [] }
+
+    func activity(id: String?) -> CompanionActivity? { activities.first { $0.id == id } }
+
+    /// Which sequences play: the commander's mood wins while it works or waits; when idle or done
+    /// she plays the chosen activity's, if it is available and has sequences.
+    func sequenceKey(mood: CompanionMood, activityID: String?) -> String {
+        guard mood == .idle || mood == .done, let key = activity(id: activityID)?.mood,
+              !sequences(forKey: key).isEmpty else { return mood.rawValue }
+        return key
     }
 
     /// The background file for `date`: the night one from 20:00 to 06:00 when there is one.
@@ -116,7 +174,7 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
         return night ? background.night ?? background.defaultPath : background.defaultPath
     }
 
-    func sequences(for mood: CompanionMood) -> [CompanionSequence] { moods[mood.rawValue] ?? [] }
+    func sequences(for mood: CompanionMood) -> [CompanionSequence] { sequences(forKey: mood.rawValue) }
     func lines(for mood: CompanionMood) -> [String] { (lines[mood.rawValue] ?? []).filter { !$0.isEmpty } }
 }
 
@@ -127,6 +185,7 @@ struct CompanionPlayer {
     static let lineRotation: TimeInterval = 20
 
     private(set) var mood: CompanionMood?
+    private(set) var playingKey: String?
     private(set) var sequence: CompanionSequence?
     private(set) var sequenceStart = Date.distantPast
     private(set) var line: String?
@@ -136,16 +195,19 @@ struct CompanionPlayer {
     /// has played long enough, or a line has been up long enough. Returns whether anything changed.
     @discardableResult
     mutating func advance(now: Date, mood newMood: CompanionMood, manifest: CompanionManifest,
+                          sequenceKey: String? = nil,
                           pick: (Int) -> Int = { Int.random(in: 0..<$0) }) -> Bool {
         var changed = false
         let moodChanged = mood != newMood
+        let key = sequenceKey ?? newMood.rawValue
+        let keyChanged = playingKey != key
         let elapsed = now.timeIntervalSince(sequenceStart)
-        if moodChanged || sequence == nil
+        if moodChanged || keyChanged || sequence == nil
             || (sequence.map { $0.loop ? elapsed >= Self.loopRotation : elapsed >= $0.duration } ?? true) {
-            let choices = manifest.sequences(for: newMood)
+            let choices = manifest.sequences(forKey: key)
             // Not the same sequence twice in a row when there is another one.
             let others = choices.filter { $0 != sequence }
-            let pool = others.isEmpty || moodChanged ? choices : others
+            let pool = others.isEmpty || moodChanged || keyChanged ? choices : others
             let next = pool.isEmpty ? nil : pool[pick(pool.count)]
             changed = true
             sequence = next
@@ -160,6 +222,7 @@ struct CompanionPlayer {
             changed = true
         }
         mood = newMood
+        playingKey = key
         return changed
     }
 
@@ -349,15 +412,18 @@ final class CompanionModel: ObservableObject {
     @Published private(set) var manifest: CompanionManifest?
     @Published private(set) var player = CompanionPlayer()
     @Published private(set) var loaded: [String: CompanionFrames] = [:]
-    private var directory = CompanionManifest.directory
     @Published private(set) var sentences: [String] = []
-    @Published private(set) var backgrounds: [String: CGImage] = [:]
+    /// Single images of the companion folder (scene, activity icons, stickers), by relative path.
+    @Published private(set) var images: [String: CGImage] = [:]
+    /// The registered skin font, if the manifest has one.
+    @Published private(set) var fontName: String?
     private var loading: Set<String> = []
     private var started = false
     private let reader = CompanionTranscriptReader()
     private var dialogueSession: String?
     private var dialogueRequested = Date.distantPast
     private var dialogueInFlight = false
+    private var directory = CompanionManifest.directory
 
     /// Loading starts at creation: the view shows nothing until the manifest is in, so an
     /// `onAppear` on that empty content would never fire.
@@ -368,18 +434,27 @@ final class CompanionModel: ObservableObject {
         started = true
         let directory = directory
         Task {
-            let manifest = await Task.detached(priority: .utility) { CompanionManifest.load(from: directory) }.value
-            self.manifest = manifest
+            let result = await Task.detached(priority: .utility) { () -> (CompanionManifest?, String?) in
+                let manifest = CompanionManifest.load(from: directory)
+                let font = manifest?.font.flatMap { CompanionFontLoader.register(at: directory.appendingPathComponent($0)) }
+                return (manifest, font)
+            }.value
+            self.fontName = result.1
+            self.manifest = result.0
+            if let manifest = result.0 {
+                for path in manifest.activities.map(\.icon) + manifest.stickers.map(\.image) { self.ensureImage(path) }
+            }
         }
     }
 
-    /// Called as time passes and when the commander's mood changes.
-    func advance(now: Date, mood: CompanionMood) {
+    /// Called as time passes and when the commander's mood or the chosen activity changes.
+    func advance(now: Date, mood: CompanionMood, activityID: String? = nil) {
         guard let manifest else { return }
         var next = player
-        if next.advance(now: now, mood: mood, manifest: manifest) { player = next }
+        let key = manifest.sequenceKey(mood: mood, activityID: activityID)
+        if next.advance(now: now, mood: mood, manifest: manifest, sequenceKey: key) { player = next }
         if let sequence = next.sequence { ensureLoaded(sequence) }
-        ensureBackground(at: now)
+        if let path = manifest.backgroundPath(at: now) { ensureImage(path) }
     }
 
     /// The commander's words for the current mood, from its newest reply.
@@ -408,25 +483,26 @@ final class CompanionModel: ObservableObject {
 
     /// The scene behind her at `now` (the night one in the evening), once loaded.
     func backgroundImage(at now: Date) -> CGImage? {
-        manifest?.backgroundPath(at: now).flatMap { backgrounds[$0] }
+        manifest?.backgroundPath(at: now).flatMap { images[$0] }
     }
 
-    private func ensureBackground(at now: Date) {
-        guard let path = manifest?.backgroundPath(at: now), backgrounds[path] == nil,
-              loading.insert("bg:" + path).inserted else { return }
+    func image(forPath path: String) -> CGImage? { images[path] }
+
+    func image(at now: Date) -> CGImage? {
+        guard let sequence = player.sequence, let frames = loaded[sequence.dir]?.images, !frames.isEmpty else { return nil }
+        return frames[min(player.frameIndex(at: now), frames.count - 1)]
+    }
+
+    private func ensureImage(_ path: String) {
+        guard images[path] == nil, loading.insert("image:" + path).inserted else { return }
         let url = directory.appendingPathComponent(path)
         Task {
             let image = await Task.detached(priority: .utility) { () -> CGImage? in
                 guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
                 return CGImageSourceCreateImageAtIndex(source, 0, nil)
             }.value
-            if let image { self.backgrounds[path] = image }
+            if let image { self.images[path] = image }
         }
-    }
-
-    func image(at now: Date) -> CGImage? {
-        guard let sequence = player.sequence, let frames = loaded[sequence.dir]?.images, !frames.isEmpty else { return nil }
-        return frames[min(player.frameIndex(at: now), frames.count - 1)]
     }
 
     private func ensureLoaded(_ sequence: CompanionSequence) {
@@ -447,48 +523,46 @@ final class CompanionModel: ObservableObject {
     }
 }
 
-/// The companion and her speech bubble. Draws nothing when there is no manifest.
+enum CompanionFontLoader {
+    /// Registers a font file for this process and returns its PostScript name.
+    nonisolated static func register(at url: URL) -> String? {
+        CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        guard let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
+              let first = descriptors.first else { return nil }
+        return CTFontDescriptorCopyAttribute(first, kCTFontNameAttribute) as? String
+    }
+}
+
+/// The room: her scene and sprite with the speech bubble under it. The companion panel around it
+/// decides whether there is anything to show.
 struct CompanionView: View {
-    let agents: [HerdrAgent]
-    let workspaceID: String?
-    /// The sidebar's width; the companion is 0.9 times as tall.
+    @ObservedObject var model: CompanionModel
+    let commander: HerdrAgent?
+    /// The sidebar's width; the room is 0.75 times as tall.
     let width: CGFloat
-    @StateObject private var model = CompanionModel()
+    @AppStorage(CompanionPreferences.activityKey) private var activityID = CompanionPreferences.defaultActivity
 
     var body: some View {
-        Group {
-            if model.manifest != nil {
-                let commander = CompanionMood.commander(in: agents, workspaceID: workspaceID)
-                let mood = CompanionMood(agentStatus: commander?.agentStatus)
-                VStack(spacing: 0) {
-                    TimelineView(.animation(minimumInterval: 1 / (model.player.sequence?.fps ?? 10))) { context in
-                        VStack(spacing: 6) {
-                            CompanionScene(background: model.backgroundImage(at: context.date),
-                                           spriteRect: model.manifest?.spriteRect,
-                                           sprite: model.image(at: context.date))
-                            if let text = model.player.bubbleText(dialogue: model.dialogue,
-                                                                  title: commander?.terminalTitleStripped) {
-                                CompanionBubble(text: text)
-                            }
-                        }
-                        .onChange(of: context.date) { _, date in
-                            model.advance(now: date, mood: mood)
-                            model.refreshDialogue(sessionID: commander?.agentSessionID, now: date)
-                        }
-                        .onChange(of: mood) { _, mood in model.advance(now: Date(), mood: mood) }
-                        .onAppear { model.advance(now: Date(), mood: mood) }
-                    }
-                    .padding(7)
-                    .frame(height: width * 0.9)
-                    Divider()
+        let mood = CompanionMood(agentStatus: commander?.agentStatus)
+        TimelineView(.animation(minimumInterval: 1 / (model.player.sequence?.fps ?? 10))) { context in
+            VStack(spacing: 6) {
+                CompanionScene(background: model.backgroundImage(at: context.date),
+                               spriteRect: model.manifest?.spriteRect,
+                               sprite: model.image(at: context.date))
+                if let text = model.player.bubbleText(dialogue: model.dialogue,
+                                                      title: commander?.terminalTitleStripped) {
+                    CompanionBubble(text: text)
                 }
             }
+            .onChange(of: context.date) { _, date in
+                model.advance(now: date, mood: mood, activityID: activityID)
+                model.refreshDialogue(sessionID: commander?.agentSessionID, now: date)
+            }
+            .onChange(of: mood) { _, mood in model.advance(now: Date(), mood: mood, activityID: activityID) }
+            .onChange(of: activityID) { _, id in model.advance(now: Date(), mood: mood, activityID: id) }
+            .onAppear { model.advance(now: Date(), mood: mood, activityID: activityID) }
         }
-        .onAppear { model.start() }
-        .onChange(of: model.manifest != nil) { _, _ in
-            model.advance(now: Date(), mood: CompanionMood(agentStatus:
-                CompanionMood.commander(in: agents, workspaceID: workspaceID)?.agentStatus))
-        }
+        .frame(height: width * 0.75)
         .accessibilityHidden(true)
     }
 }

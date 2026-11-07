@@ -43,6 +43,7 @@
 		A10000000000000000000022 /* HerdrSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000023 /* HerdrSettingsView.swift */; };
 		A10000000000000000000024 /* HerdrShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000025 /* HerdrShortcuts.swift */; };
 		A1C00000000000000000A101 /* Companion.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000A102 /* Companion.swift */; };
+		A1C00000000000000000A103 /* CompanionBoxes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000A104 /* CompanionBoxes.swift */; };
 		A10000000000000000000026 /* WorkspaceFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* WorkspaceFiles.swift */; };
 		AFE100000000000000000004 /* WorkspaceFiles+Listing.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFE100000000000000000005 /* WorkspaceFiles+Listing.swift */; };
 		AFE100000000000000000002 /* WorkspaceFiles+Git.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFE100000000000000000003 /* WorkspaceFiles+Git.swift */; };
@@ -215,6 +216,7 @@
 		A10000000000000000000023 /* HerdrSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrSettingsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000025 /* HerdrShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrShortcuts.swift; sourceTree = "<group>"; };
 		A1C00000000000000000A102 /* Companion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Companion.swift; sourceTree = "<group>"; };
+		A1C00000000000000000A104 /* CompanionBoxes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionBoxes.swift; sourceTree = "<group>"; };
 		A10000000000000000000027 /* WorkspaceFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFiles.swift; sourceTree = "<group>"; };
 		AFE100000000000000000005 /* WorkspaceFiles+Listing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WorkspaceFiles+Listing.swift"; sourceTree = "<group>"; };
 		AFE100000000000000000003 /* WorkspaceFiles+Git.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WorkspaceFiles+Git.swift"; sourceTree = "<group>"; };
@@ -377,6 +379,7 @@
 				A10000000000000000000023 /* HerdrSettingsView.swift */,
 				A10000000000000000000025 /* HerdrShortcuts.swift */,
 				A1C00000000000000000A102 /* Companion.swift */,
+				A1C00000000000000000A104 /* CompanionBoxes.swift */,
 				A10000000000000000000027 /* WorkspaceFiles.swift */,
 				AFE100000000000000000005 /* WorkspaceFiles+Listing.swift */,
 				AFE100000000000000000003 /* WorkspaceFiles+Git.swift */,
@@ -681,6 +684,7 @@
 				A10000000000000000000022 /* HerdrSettingsView.swift in Sources */,
 				A10000000000000000000024 /* HerdrShortcuts.swift in Sources */,
 				A1C00000000000000000A101 /* Companion.swift in Sources */,
+				A1C00000000000000000A103 /* CompanionBoxes.swift in Sources */,
 				A10000000000000000000026 /* WorkspaceFiles.swift in Sources */,
 				AFE100000000000000000004 /* WorkspaceFiles+Listing.swift in Sources */,
 				AFE100000000000000000002 /* WorkspaceFiles+Git.swift in Sources */,

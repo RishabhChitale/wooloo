@@ -77,6 +77,7 @@ private struct DestinationContentView: View {
     @State private var followsHerdrAgentView = true
     @AppStorage("filesSidebarShowsExplorer") private var showsExplorer = false
     @State private var spacesContentHeight: CGFloat = 0
+    @State private var rightSidebarHeight: CGFloat = 800
     @State private var connectionRequest = UUID()
     @State private var popupDocument: (session: String, space: String?, tab: String?, document: String)?
 
@@ -339,8 +340,8 @@ private struct DestinationContentView: View {
                 SidebarResizeHandle(width: $filesSidebarWidth, defaultWidth: 244, edge: .trailing,
                                     range: 200...max(200, min(560, totalWidth - left - mainMinimum)))
                 VStack(spacing: 0) {
-                    CompanionView(agents: herdr.snapshot?.agents ?? [], workspaceID: herdr.selectedWorkspaceID,
-                                  width: filesSidebarWidth)
+                    CompanionPanel(agents: herdr.snapshot?.agents ?? [], workspaceID: herdr.selectedWorkspaceID,
+                                   width: filesSidebarWidth, maxHeight: rightSidebarHeight * 0.65)
                     filesSidebarSpaces
                     HStack {
                         Spacer()
@@ -399,6 +400,13 @@ private struct DestinationContentView: View {
                                      showsExplorer: showsExplorer)
                 }
                 .frame(width: filesSidebarWidth)
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.onChange(of: proxy.size.height, initial: true) { _, height in
+                            rightSidebarHeight = height
+                        }
+                    }
+                }
             }
         }
     }

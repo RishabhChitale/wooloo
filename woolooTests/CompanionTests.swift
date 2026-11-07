@@ -277,4 +277,78 @@ final class CompanionTests: XCTestCase {
         XCTAssertFalse(CompanionTranscriptReader.isSessionID("a/b"))
         XCTAssertFalse(CompanionTranscriptReader.isSessionID(""))
     }
+
+    // MARK: Activities
+
+    private func activityManifest() throws -> CompanionManifest {
+        let json = """
+        {"version":1,"size":[64,64],
+         "moods":{"idle":[{"dir":"idle/0","frames":2,"fps":2,"loop":true}],
+                  "working":[{"dir":"working/0","frames":2,"fps":2,"loop":true}],
+                  "game":[{"dir":"game/0","frames":2,"fps":2,"loop":true}]},
+         "lines":{},
+         "activities":[{"id":"idle","label":"Idle","icon":"activities/idle.png","mood":"idle"},
+                       {"id":"game","label":"Game","icon":"activities/game.png","mood":"game"},
+                       {"id":"stream","label":"Stream","icon":"activities/stream.png","mood":"stream_watch"},
+                       {"id":"soon","label":"Soon","icon":"activities/soon.png","mood":null},
+                       {"id":"bad","label":"Bad","icon":"../x.png","mood":"game"},
+                       {"label":"No id"}],
+         "stickers":[{"id":"ok","label":"OK","image":"stickers/ok.png"},{"id":"broken"}],
+         "font":"font/pixel.ttf"}
+        """
+        return try XCTUnwrap(CompanionManifest.decode(Data(json.utf8)))
+    }
+
+    func testActivitiesAndStickersDecodeLeniently() throws {
+        let manifest = try activityManifest()
+        XCTAssertEqual(manifest.activities.map(\.id), ["idle", "game", "stream", "soon"], "broken and unsafe ones are skipped")
+        XCTAssertNil(manifest.activity(id: "soon")?.mood)
+        XCTAssertEqual(manifest.stickers.map(\.label), ["OK"])
+        XCTAssertEqual(manifest.font, "font/pixel.ttf")
+        let plain = try XCTUnwrap(CompanionManifest.decode(manifestJSON(extra: "")))
+        XCTAssertEqual(plain.activities, [])
+        XCTAssertEqual(plain.stickers, [])
+        XCTAssertNil(plain.font)
+    }
+
+    func testChosenActivityPlaysOnlyWhenTheCommanderIsIdleOrDone() throws {
+        let manifest = try activityManifest()
+        XCTAssertEqual(manifest.sequenceKey(mood: .working, activityID: "game"), "working", "work wins")
+        XCTAssertEqual(manifest.sequenceKey(mood: .waiting, activityID: "game"), "waiting")
+        XCTAssertEqual(manifest.sequenceKey(mood: .idle, activityID: "game"), "game")
+        XCTAssertEqual(manifest.sequenceKey(mood: .done, activityID: "game"), "game")
+        XCTAssertEqual(manifest.sequenceKey(mood: .idle, activityID: "idle"), "idle")
+        XCTAssertEqual(manifest.sequenceKey(mood: .idle, activityID: "soon"), "idle", "not available yet")
+        XCTAssertEqual(manifest.sequenceKey(mood: .idle, activityID: "stream"), "idle", "no sequences for its mood")
+        XCTAssertEqual(manifest.sequenceKey(mood: .idle, activityID: "nope"), "idle")
+        XCTAssertEqual(manifest.sequenceKey(mood: .idle, activityID: nil), "idle")
+    }
+
+    func testPlayerSwitchesSequencesWhenTheActivityChanges() throws {
+        let manifest = try activityManifest()
+        var player = CompanionPlayer()
+        let start = Date(timeIntervalSince1970: 1000)
+        player.advance(now: start, mood: .idle, manifest: manifest, sequenceKey: "idle", pick: { _ in 0 })
+        XCTAssertEqual(player.sequence?.dir, "idle/0")
+        XCTAssertTrue(player.advance(now: start.addingTimeInterval(1), mood: .idle, manifest: manifest,
+                                     sequenceKey: "game", pick: { _ in 0 }))
+        XCTAssertEqual(player.sequence?.dir, "game/0")
+        player.advance(now: start.addingTimeInterval(2), mood: .working, manifest: manifest,
+                       sequenceKey: manifest.sequenceKey(mood: .working, activityID: "game"), pick: { _ in 0 })
+        XCTAssertEqual(player.sequence?.dir, "working/0")
+    }
+
+    func testChoicesPersistInUserDefaults() throws {
+        let suite = "wooloo.companion.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(CompanionPreferences.activityID(defaults: defaults), "idle")
+        XCTAssertFalse(CompanionPreferences.isCollapsed(CompanionPreferences.activitiesCollapsedKey, defaults: defaults))
+        CompanionPreferences.setActivityID("game", defaults: defaults)
+        CompanionPreferences.setCollapsed(true, key: CompanionPreferences.activitiesCollapsedKey, defaults: defaults)
+        XCTAssertEqual(CompanionPreferences.activityID(defaults: defaults), "game")
+        XCTAssertTrue(CompanionPreferences.isCollapsed(CompanionPreferences.activitiesCollapsedKey, defaults: defaults))
+        XCTAssertFalse(CompanionPreferences.isCollapsed(CompanionPreferences.jineCollapsedKey, defaults: defaults))
+        XCTAssertEqual(defaults.string(forKey: "companionActivity"), "game", "the key the view reads")
+    }
 }
