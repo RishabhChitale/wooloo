@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a tag vX.Y.Z, matching MARKETING_VERSION, on a commit of main whose CI passed builds
+# Pushing a tag vX.Y.Z or vX.Y.Z.N (the fork's build N), matching MARKETING_VERSION, on a commit of main whose CI passed builds
 # wooloo and publishes the GitHub release with the archive and the signed Sparkle feed. Installed
 # copies read the feed from the latest release (SUFeedURL in wooloo/Info.plist), so every release
 # must carry appcast.xml.
@@ -35,8 +35,8 @@ jobs:
       - name: Check the version
         run: |
           version=${GITHUB_REF_NAME#v}
-          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Release tags look like v1.2.3, not $GITHUB_REF_NAME"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+            echo "::error::Release tags look like v1.2.3 or v1.2.3.4, not $GITHUB_REF_NAME"
             exit 1
           fi
           marketing=$(sed -n 's/.*MARKETING_VERSION = \(.*\);/\1/p' wooloo.xcodeproj/project.pbxproj | sort -u)

@@ -10,6 +10,8 @@ import sys
 
 
 MACOS_JOB = "macOS build and test"
+# the fork's sync workflow starts CI with workflow_dispatch, since GITHUB_TOKEN pushes start no workflows
+RELEASE_EVENTS = ("push", "workflow_dispatch")
 SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -78,12 +80,12 @@ def release_ci_succeeded(repository, sha):
         raise ValueError("Missing or invalid release repository/SHA")
     endpoint = (
         f"repos/{repository}/actions/workflows/ci.yml/runs"
-        f"?per_page=100&event=push&branch=main&head_sha={sha}&status=success"
+        f"?per_page=100&branch=main&head_sha={sha}&status=success"
     )
     for run in github_pages(endpoint, "workflow_runs"):
         if not (
             run.get("path") == ".github/workflows/ci.yml"
-            and run.get("event") == "push" and run.get("head_branch") == "main"
+            and run.get("event") in RELEASE_EVENTS and run.get("head_branch") == "main"
             and run.get("head_sha") == sha
             and run.get("status") == "completed" and run.get("conclusion") == "success"
         ):
@@ -129,7 +131,7 @@ def main(argv=None):
             print("CI failed: classification or required macOS tests did not complete as expected.", file=sys.stderr)
             return 1
         if release_ci_succeeded(env.get("GITHUB_REPOSITORY", ""), env.get("GITHUB_SHA", "")):
-            print("Release commit passed the full macOS suite in a CI push to main.")
+            print("Release commit passed the full macOS suite in a CI run on main.")
             return 0
         print("CI has not passed the full suite on this main commit; wait for it, then push the tag again.",
               file=sys.stderr)

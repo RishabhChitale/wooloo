@@ -155,6 +155,10 @@ class ReleaseCITests(unittest.TestCase):
         self.assertIn("head_sha=" + self.sha, api.call_args_list[0].args[0])
         self.assertIn("/runs/100/attempts/2/jobs?", api.call_args_list[1].args[0])
 
+    def test_workflow_dispatch_run_on_main_is_accepted(self):
+        self.assertTrue(self.check(runs=[dict(self.run, event="workflow_dispatch")])[0])
+        self.assertFalse(self.check(runs=[dict(self.run, event="schedule")])[0])
+
     def test_pr_other_workflow_branch_sha_and_unfinished_runs_are_rejected(self):
         for field, value in [("event", "pull_request"), ("path", ".github/workflows/other.yml"),
                              ("head_branch", "feature"), ("head_sha", "b" * 40),
