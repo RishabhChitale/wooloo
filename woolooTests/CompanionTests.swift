@@ -157,7 +157,8 @@ final class CompanionTests: XCTestCase {
         for hour in [6, 12, 19] { XCTAssertFalse(CompanionBackground.isNight(hour: hour), "\(hour)") }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
-        let day = Date(timeIntervalSince1970: 1_700_000_000 - 1_700_000_000 % 86_400 + 12 * 3600)
+        let noon: Int = 1_700_000_000 - 1_700_000_000 % 86_400 + 12 * 3600
+        let day = Date(timeIntervalSince1970: TimeInterval(noon))
         let night = day.addingTimeInterval(9 * 3600)
         let both = try XCTUnwrap(CompanionManifest.decode(manifestJSON(extra:
             #","background":{"default":"d.png","night":"n.png"},"sprite_rect":[0,0,1,1]"#)))
