@@ -78,7 +78,6 @@ private struct DestinationContentView: View {
     @AppStorage("filesSidebarShowsExplorer") private var showsExplorer = false
     @AppStorage("filesSidebarShowsGitHub") private var showsGitHub = false
     @State private var spacesContentHeight: CGFloat = 0
-    @State private var rightSidebarHeight: CGFloat = 800
     @State private var connectionRequest = UUID()
     @State private var popupDocument: (session: String, space: String?, tab: String?, document: String)?
 
@@ -342,7 +341,7 @@ private struct DestinationContentView: View {
                                     range: 200...max(200, min(560, totalWidth - left - mainMinimum)))
                 VStack(spacing: 0) {
                     CompanionPanel(store: herdr, agents: herdr.snapshot?.agents ?? [], workspaceID: herdr.selectedWorkspaceID,
-                                   width: filesSidebarWidth, maxHeight: rightSidebarHeight * 0.65)
+                                   width: filesSidebarWidth)
                     filesSidebarSpaces
                     HStack(spacing: 12) {
                         Spacer()
@@ -415,13 +414,6 @@ private struct DestinationContentView: View {
                     }
                 }
                 .frame(width: filesSidebarWidth)
-                .background {
-                    GeometryReader { proxy in
-                        Color.clear.onChange(of: proxy.size.height, initial: true) { _, height in
-                            rightSidebarHeight = height
-                        }
-                    }
-                }
             }
         }
     }

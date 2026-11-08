@@ -352,7 +352,7 @@ enum CompanionAffection {
     /// `extra` are more phrases, such as the label of the LOVE sticker. Words and phrases match whole.
     static func matches(_ text: String?, extra: [String] = []) -> Bool {
         guard let text else { return false }
-        let lowered = text.lowercased().replacingOccurrences(of: "’", with: "'")
+        let lowered = (CompanionMessage.stickerLabel(in: text) ?? text).lowercased().replacingOccurrences(of: "’", with: "'")
         if lowered.contains("<3") || lowered.unicodeScalars.contains(where: isHeart) { return true }
         let tokens = lowered.split(whereSeparator: { !($0.isLetter || $0.isNumber || $0 == "'") }).map(String.init)
         if !words.isDisjoint(with: tokens) { return true }
@@ -435,6 +435,18 @@ struct CompanionMessage: Equatable, Sendable {
         let flat = CompanionDialogue.stripMarkdown(text).replacingOccurrences(of: "\n", with: " ")
         guard flat.count > Self.maximumDisplayLength else { return flat }
         return String(flat.prefix(Self.maximumDisplayLength - 1)).trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    /// What the chat sends for a tapped sticker, and the label back out of such a message.
+    static func stickerMarker(_ label: String) -> String { "[sticker: \(label)]" }
+
+    static func stickerLabel(in text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let opening = "[sticker: "
+        guard trimmed.hasPrefix(opening), trimmed.hasSuffix("]"), !trimmed.contains("\n") else { return nil }
+        let label = trimmed.dropFirst(opening.count).dropLast()
+        guard !label.isEmpty, !label.contains("]") else { return nil }
+        return String(label)
     }
 
     /// "last sent 5s ago", "…3m ago", "…2h ago", "…1d ago".
@@ -971,6 +983,30 @@ struct CompanionView: View {
                                sprite: model.image(at: context.date),
                                spriteVisible: model.image(at: context.date).flatMap { model.visibleBounds(of: $0) },
                                zoom: CompanionPreferences.clampedZoom(zoom))
+                .frame(height: CompanionPreferences.roomHeight(width: width, factor: heightFactor))
+                .overlay(alignment: .bottom) {
+                    // A thin grab strip along the bottom edge; dragging down makes the room taller.
+                    ResizeHandleArea(
+                        vertical: true,
+                        tooltip: "Drag to resize the webcam · double-click to reset",
+                        onDrag: { translation in
+                            guard width > 0 else { return }
+                            let start = dragStartFactor ?? CompanionPreferences.clampedHeightFactor(heightFactor)
+                            dragStartFactor = start
+                            heightFactor = CompanionPreferences.clampedHeightFactor(start + translation / width)
+                        },
+                        onDragEnd: { dragStartFactor = nil },
+                        onReset: { heightFactor = CompanionPreferences.defaultHeightFactor }
+                    )
+                    .frame(height: 7)
+                }
+                .overlay(alignment: .topTrailing) {
+                    if model.manifest?.skins.isEmpty == false {
+                        CompanionGearButton(isPresented: $showsSettings) {
+                            CompanionWebcamSettings(model: model, isPresented: $showsSettings)
+                        }
+                    }
+                }
                 if let text = model.player.bubbleText(dialogue: model.dialogue,
                                                       title: commander?.terminalTitleStripped) {
                     CompanionBubble(text: text)
@@ -986,30 +1022,6 @@ struct CompanionView: View {
             .onChange(of: activityID) { _, id in model.advance(now: Date(), mood: mood, activityID: id, skin: skin, status: commander?.agentStatus) }
             .onChange(of: skin) { _, skin in model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus) }
             .onAppear { model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus) }
-        }
-        .frame(height: width * CompanionPreferences.clampedHeightFactor(heightFactor))
-        .overlay(alignment: .bottom) {
-            // A thin grab strip along the bottom edge; dragging down makes the room taller.
-            ResizeHandleArea(
-                vertical: true,
-                tooltip: "Drag to resize the webcam · double-click to reset",
-                onDrag: { translation in
-                    guard width > 0 else { return }
-                    let start = dragStartFactor ?? CompanionPreferences.clampedHeightFactor(heightFactor)
-                    dragStartFactor = start
-                    heightFactor = CompanionPreferences.clampedHeightFactor(start + translation / width)
-                },
-                onDragEnd: { dragStartFactor = nil },
-                onReset: { heightFactor = CompanionPreferences.defaultHeightFactor }
-            )
-            .frame(height: 7)
-        }
-        .overlay(alignment: .topTrailing) {
-            if model.manifest?.skins.isEmpty == false {
-                CompanionGearButton(isPresented: $showsSettings) {
-                    CompanionWebcamSettings(model: model, isPresented: $showsSettings)
-                }
-            }
         }
         .accessibilityHidden(true)
     }

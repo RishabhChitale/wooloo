@@ -123,6 +123,13 @@ final class HerdrNotifier: NSObject, ObservableObject, UNUserNotificationCenterD
     /// wooloo-only preferences, stored in UserDefaults rather than config.toml.
     static let dockBadgeKey = "NotificationDockBadge"
     static let bounceDockKey = "NotificationBounceDock"
+    /// Whether Ame's replies on JINE raise alerts; off by default.
+    static let notifyAmeKey = "notifyAmeReplies"
+
+    /// Alerts of the agent named "ame" are skipped unless the user asked for them.
+    static func suppresses(agentName: String?, notifiesAme: Bool) -> Bool {
+        agentName?.lowercased() == "ame" && !notifiesAme
+    }
     private var showsDockBadge: Bool { UserDefaults.standard.object(forKey: Self.dockBadgeKey) as? Bool ?? true }
     private var bouncesDock: Bool { UserDefaults.standard.object(forKey: Self.bounceDockKey) as? Bool ?? true }
 
@@ -226,6 +233,8 @@ final class HerdrNotifier: NSObject, ObservableObject, UNUserNotificationCenterD
             case "idle" where previous == "working": kind = .done
             default: continue
             }
+            if Self.suppresses(agentName: agent.name,
+                               notifiesAme: UserDefaults.standard.bool(forKey: Self.notifyAmeKey)) { continue }
             raise(kind, agent: agent, snapshot: snapshot, selectedPaneID: selectedPaneID, contextID: contextID)
         }
     }

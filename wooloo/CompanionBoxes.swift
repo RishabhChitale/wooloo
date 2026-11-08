@@ -30,6 +30,11 @@ enum CompanionPreferences {
         clamp(value, to: heightFactorRange, fallback: defaultHeightFactor)
     }
 
+    /// The height of the room (the scene alone, not the speech bubble under it).
+    static func roomHeight(width: CGFloat, factor: Double) -> CGFloat {
+        max(0, width) * CGFloat(clampedHeightFactor(factor))
+    }
+
     static func clampedZoom(_ value: Double) -> Double {
         clamp(value, to: zoomRange, fallback: defaultZoom)
     }
@@ -183,6 +188,7 @@ struct CompanionWebcamSettings: View {
     @AppStorage(CompanionPreferences.skinKey) private var skin = CompanionManifest.defaultSkin
     @AppStorage(CompanionPreferences.heightFactorKey) private var heightFactor = CompanionPreferences.defaultHeightFactor
     @AppStorage(CompanionPreferences.zoomKey) private var zoom = CompanionPreferences.defaultZoom
+    @AppStorage(HerdrNotifier.notifyAmeKey) private var notifiesAme = false
     @Environment(\.woolooTypography) private var typography
 
     var body: some View {
@@ -229,6 +235,10 @@ struct CompanionWebcamSettings: View {
                     CompanionActivityPicker(model: model)
                     sliderRow("Size", value: $heightFactor, range: CompanionPreferences.heightFactorRange)
                     sliderRow("Zoom", value: $zoom, range: CompanionPreferences.zoomRange)
+                    Toggle("Notify when Ame replies on JINE", isOn: $notifiesAme)
+                        .toggleStyle(.checkbox)
+                        .font(CompanionFont.font(model.fontName, size: typography.caption))
+                        .foregroundStyle(CompanionPalette.indigo)
                 }
             }
         }
@@ -353,23 +363,15 @@ struct CompanionJineBox: View {
 
     private var messagePanel: some View {
         VStack(spacing: 2) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 4) {
-                        ForEach(Array(model.messages.enumerated()), id: \.offset) { index, message in
-                            bubble(message).id(index)
-                        }
-                    }
-                    .padding(4)
-                }
-                .onChange(of: model.messages) { _, messages in
-                    if !messages.isEmpty { proxy.scrollTo(messages.count - 1, anchor: .bottom) }
-                }
-                .onAppear {
-                    if !model.messages.isEmpty { proxy.scrollTo(model.messages.count - 1, anchor: .bottom) }
+            // No scrolling: the newest messages sit at the bottom and older ones are clipped at the top.
+            VStack(spacing: 4) {
+                ForEach(Array(model.messages.enumerated()), id: \.offset) { _, message in
+                    bubble(message)
                 }
             }
-            .frame(height: 118)
+            .padding(4)
+            .frame(maxWidth: .infinity, minHeight: 118, maxHeight: 118, alignment: .bottom)
+            .clipped()
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(CompanionMessage.lastSent(model.messages.last?.time, now: context.date) ?? " ")
                     .font(.system(size: typography.caption))
@@ -383,15 +385,25 @@ struct CompanionJineBox: View {
 
     private func bubble(_ message: CompanionMessage) -> some View {
         let mine = message.role == .user
+        let sticker = CompanionMessage.stickerLabel(in: message.text).flatMap { label in
+            model.manifest?.stickers.first { $0.label == label }
+        }
         return HStack(spacing: 0) {
             if mine { Spacer(minLength: 24) }
-            Text(message.displayText)
+            if let sticker, let image = model.image(forPath: sticker.image) {
+                Image(decorative: image, scale: 1).interpolation(.none).resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 64)
+                    .padding(2)
+            } else {
+            Text(CompanionMessage.stickerLabel(in: message.text) ?? message.displayText)
                 .font(CompanionFont.font(model.fontName, size: typography.caption))
                 .foregroundStyle(Color(red: 0.2, green: 0.15, blue: 0.3))
                 .multilineTextAlignment(mine ? .trailing : .leading)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 4)
                 .background(mine ? Color.white : CompanionPalette.titleBar, in: RoundedRectangle(cornerRadius: 7))
+            }
             if !mine { Spacer(minLength: 24) }
         }
     }
@@ -412,7 +424,7 @@ struct CompanionJineBox: View {
         ScrollView(.horizontal) {
             HStack(spacing: 4) {
                 ForEach(stickers) { sticker in
-                    Button { submit(sticker.label, clearsDraft: false) } label: {
+                    Button { submit(CompanionMessage.stickerMarker(sticker.label), clearsDraft: false) } label: {
                         Group {
                             if let image = model.image(forPath: sticker.image) {
                                 Image(decorative: image, scale: 1).interpolation(.none).resizable()
@@ -436,9 +448,14 @@ struct CompanionJineBox: View {
 
     private var composer: some View {
         HStack(spacing: 4) {
-            TextField("Message Ame-chan…", text: $draft)
+            TextField("", text: $draft,
+                      prompt: Text("Message Ame-chan…").foregroundColor(CompanionPalette.indigo.opacity(0.55)))
                 .textFieldStyle(.plain)
                 .font(.system(size: typography.secondary))
+                .foregroundStyle(Color.black)
+                .tint(CompanionPalette.indigo)
+                // The field is always white, so it is drawn in the light appearance in dark mode too.
+                .environment(\.colorScheme, .light)
                 .padding(.horizontal, 6)
                 .frame(height: typography.metric(22))
                 .background(Color.white)
@@ -471,7 +488,7 @@ struct CompanionJineBox: View {
     }
 }
 
-/// Her room, and the boxes under it, in a scroll view when they are taller than `maxHeight`.
+/// Her room and the chat box under it.
 /// Draws nothing when there is no manifest.
 struct CompanionPanel: View {
     let store: HerdrStore
@@ -479,31 +496,19 @@ struct CompanionPanel: View {
     let workspaceID: String?
     /// The sidebar's width.
     let width: CGFloat
-    /// The tallest the panel may be before it scrolls.
-    let maxHeight: CGFloat
     @StateObject private var model = CompanionModel()
-    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
         if model.manifest != nil {
             let commander = CompanionMood.commander(in: agents, workspaceID: workspaceID)
             let ame = CompanionMood.ame(in: agents)
             VStack(spacing: 0) {
-                ScrollView {
-                    VStack(spacing: 6) {
-                        CompanionView(model: model, commander: commander, ame: ame, store: store, width: width - 14)
-                        CompanionJineBox(model: model, ame: ame, store: store)
-                    }
-                    .padding(7)
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear.onChange(of: proxy.size.height, initial: true) { _, height in
-                                contentHeight = height
-                            }
-                        }
-                    }
+                // Her room and the chat take their natural height; the sections below make room.
+                VStack(spacing: 6) {
+                    CompanionView(model: model, commander: commander, ame: ame, store: store, width: width - 14)
+                    CompanionJineBox(model: model, ame: ame, store: store)
                 }
-                .frame(height: min(contentHeight, max(maxHeight, 120)))
+                .padding(7)
                 Divider()
             }
         }

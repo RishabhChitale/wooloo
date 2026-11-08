@@ -895,4 +895,38 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(CompanionMood.ame(in: [other, ame])?.paneID, "w2:p9")
         XCTAssertNil(CompanionMood.ame(in: [other]))
     }
+
+    // MARK: Stickers, sizing, Ame alerts
+
+    func testStickerMarkerRoundTripsAndRejectsOtherText() {
+        XCTAssertEqual(CompanionMessage.stickerMarker("LOVE"), "[sticker: LOVE]")
+        XCTAssertEqual(CompanionMessage.stickerLabel(in: "[sticker: LOVE]"), "LOVE")
+        XCTAssertEqual(CompanionMessage.stickerLabel(in: "  [sticker: Good job] \n"), "Good job")
+        XCTAssertNil(CompanionMessage.stickerLabel(in: "hi [sticker: LOVE]"))
+        XCTAssertNil(CompanionMessage.stickerLabel(in: "[sticker: ]"))
+        XCTAssertNil(CompanionMessage.stickerLabel(in: "[sticker: a] b]"))
+        XCTAssertNil(CompanionMessage.stickerLabel(in: "[sticker: a]\nmore"))
+        XCTAssertNil(CompanionMessage.stickerLabel(in: "LOVE"))
+    }
+
+    func testLoveStillFiresForTheStickerMarker() {
+        XCTAssertTrue(CompanionAffection.matches("[sticker: LOVE]", extra: ["LOVE"]))
+        XCTAssertTrue(CompanionAffection.matches("[sticker: Big hug]", extra: ["big hug"]))
+        XCTAssertFalse(CompanionAffection.matches("[sticker: WAVE]", extra: ["LOVE"]))
+    }
+
+    func testRoomHeightIsWidthTimesTheClampedFactor() {
+        XCTAssertEqual(CompanionPreferences.roomHeight(width: 200, factor: 1.0), 200)
+        XCTAssertEqual(CompanionPreferences.roomHeight(width: 200, factor: 9), 360)
+        XCTAssertEqual(CompanionPreferences.roomHeight(width: 200, factor: 0), 100)
+        XCTAssertEqual(CompanionPreferences.roomHeight(width: -5, factor: 1), 0)
+    }
+
+    func testAmeAlertsAreSkippedUnlessEnabled() {
+        XCTAssertTrue(HerdrNotifier.suppresses(agentName: "ame", notifiesAme: false))
+        XCTAssertTrue(HerdrNotifier.suppresses(agentName: "Ame", notifiesAme: false))
+        XCTAssertFalse(HerdrNotifier.suppresses(agentName: "ame", notifiesAme: true))
+        XCTAssertFalse(HerdrNotifier.suppresses(agentName: "commander", notifiesAme: false))
+        XCTAssertFalse(HerdrNotifier.suppresses(agentName: nil, notifiesAme: false))
+    }
 }
