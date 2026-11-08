@@ -1244,10 +1244,10 @@ final class CompanionModel: ObservableObject {
         if let sequence = next.sequence { ensureLoaded(sequence) }
         if let upcoming = next.upcoming { ensureLoaded(upcoming) }
         // Only the sequence in play and the next variant stay decoded.
-        let wanted = Set([next.sequence?.dir, next.upcoming?.dir].compactMap { $0 })
-        if !loaded.keys.allSatisfy(wanted.contains) {
-            loaded = loaded.filter { wanted.contains($0.key) }
-            loadedFully = loadedFully.intersection(wanted)
+        let keepDirs = Set([next.sequence?.dir, next.upcoming?.dir].compactMap { $0 })
+        if !loaded.keys.allSatisfy(keepDirs.contains) {
+            loaded = loaded.filter { keepDirs.contains($0.key) }
+            loadedFully = loadedFully.intersection(keepDirs)
         }
         ensureSkinBounds(skin: skin ?? CompanionManifest.defaultSkin, manifest: manifest)
         if let path = manifest.backgroundPath(at: now) { ensureImage(path) }
