@@ -427,7 +427,7 @@ struct CompanionMessage: Equatable, Sendable {
     let text: String
     let time: Date?
 
-    static let maximumDisplayLength = 200
+    static let maximumDisplayLength = 2000
     static let maximumSendLength = 4000
 
     /// Markdown stripped, lines joined, capped for a bubble.
@@ -846,7 +846,7 @@ final class CompanionModel: ObservableObject {
             self.ameInFlight = false
             guard self.ameSession == sessionID else { return }
             let shown = CompanionNudge.visible(snapshot.messages)
-            let next = Array(shown.suffix(4))
+            let next = Array(shown.suffix(24))
             if next != self.messages { self.messages = next }
             let loveLabels = (self.manifest?.stickers ?? []).filter { $0.id == "love" }.map(\.label)
             self.ameLoveTime = CompanionAffection.newestLove(in: shown, extra: loveLabels)

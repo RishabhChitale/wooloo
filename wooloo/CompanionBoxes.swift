@@ -363,15 +363,24 @@ struct CompanionJineBox: View {
 
     private var messagePanel: some View {
         VStack(spacing: 2) {
-            // No scrolling: the newest messages sit at the bottom and older ones are clipped at the top.
-            VStack(spacing: 4) {
-                ForEach(Array(model.messages.enumerated()), id: \.offset) { _, message in
-                    bubble(message)
+            // The list scrolls inside its fixed box; the newest message is kept in view.
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 4) {
+                        ForEach(Array(model.messages.enumerated()), id: \.offset) { index, message in
+                            bubble(message).id(index)
+                        }
+                    }
+                    .padding(4)
+                }
+                .onChange(of: model.messages) { _, messages in
+                    if !messages.isEmpty { proxy.scrollTo(messages.count - 1, anchor: .bottom) }
+                }
+                .onAppear {
+                    if !model.messages.isEmpty { proxy.scrollTo(model.messages.count - 1, anchor: .bottom) }
                 }
             }
-            .padding(4)
-            .frame(maxWidth: .infinity, minHeight: 118, maxHeight: 118, alignment: .bottom)
-            .clipped()
+            .frame(height: 118)
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(CompanionMessage.lastSent(model.messages.last?.time, now: context.date) ?? " ")
                     .font(.system(size: typography.caption))
@@ -399,7 +408,8 @@ struct CompanionJineBox: View {
             Text(CompanionMessage.stickerLabel(in: message.text) ?? message.displayText)
                 .font(CompanionFont.font(model.fontName, size: typography.caption))
                 .foregroundStyle(Color(red: 0.2, green: 0.15, blue: 0.3))
-                .multilineTextAlignment(mine ? .trailing : .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 4)
                 .background(mine ? Color.white : CompanionPalette.titleBar, in: RoundedRectangle(cornerRadius: 7))

@@ -393,8 +393,10 @@ final class CompanionTests: XCTestCase {
     }
 
     func testMessageBubblesAreCapped() {
-        let long = CompanionMessage(role: .assistant, text: String(repeating: "x", count: 500), time: nil)
+        let long = CompanionMessage(role: .assistant, text: String(repeating: "x", count: 3000), time: nil)
         XCTAssertEqual(long.displayText.count, CompanionMessage.maximumDisplayLength)
+        let reply = CompanionMessage(role: .assistant, text: String(repeating: "word ", count: 120), time: nil)
+        XCTAssertFalse(reply.displayText.hasSuffix("…"), "a normal long reply is shown whole")
         XCTAssertTrue(long.displayText.hasSuffix("…"))
     }
 
