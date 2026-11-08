@@ -16,6 +16,13 @@ enum CompanionPreferences {
     static let defaultHeightFactor = 1.0
     static let heightFactorRange: ClosedRange<Double> = 0.5...1.8
     /// How far the scene is magnified around her sprite.
+    /// Whether changing skin plays its cutscene, when the manifest has one; on unless turned off.
+    static let transitionsKey = "companionTransitions"
+
+    static func playsTransitions(defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: transitionsKey) as? Bool ?? true
+    }
+
     static let zoomKey = "companionZoom"
     static let defaultZoom = 2.0
     static let zoomRange: ClosedRange<Double> = 1.0...2.5
@@ -189,6 +196,7 @@ struct CompanionWebcamSettings: View {
     @AppStorage(CompanionPreferences.heightFactorKey) private var heightFactor = CompanionPreferences.defaultHeightFactor
     @AppStorage(CompanionPreferences.zoomKey) private var zoom = CompanionPreferences.defaultZoom
     @AppStorage(HerdrNotifier.notifyAmeKey) private var notifiesAme = false
+    @AppStorage(CompanionPreferences.transitionsKey) private var playsTransitions = true
     @Environment(\.woolooTypography) private var typography
 
     var body: some View {
@@ -235,6 +243,10 @@ struct CompanionWebcamSettings: View {
                     CompanionActivityPicker(model: model)
                     sliderRow("Size", value: $heightFactor, range: CompanionPreferences.heightFactorRange)
                     sliderRow("Zoom", value: $zoom, range: CompanionPreferences.zoomRange)
+                    Toggle("Play transformation when changing skin", isOn: $playsTransitions)
+                        .toggleStyle(.checkbox)
+                        .font(CompanionFont.font(model.fontName, size: typography.caption))
+                        .foregroundStyle(CompanionPalette.indigo)
                     Toggle("Notify when Ame replies on JINE", isOn: $notifiesAme)
                         .toggleStyle(.checkbox)
                         .font(CompanionFont.font(model.fontName, size: typography.caption))

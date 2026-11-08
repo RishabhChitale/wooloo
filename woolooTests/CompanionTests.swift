@@ -947,4 +947,74 @@ final class CompanionTests: XCTestCase {
         }
         XCTAssertEqual(CompanionScene.fillScale(content: .zero, in: CGSize(width: 10, height: 10)), 1)
     }
+
+    // MARK: Skin change cutscenes
+
+    private func manifestJSON(transitions: String) -> Data {
+        let sequence = #"{"dir":"idle","frames":2,"fps":4,"loop":true}"#
+        return Data(("""
+        {"version":1,"size":[10,10],"moods":{"idle":[\(sequence)]},"transitions":\(transitions)}
+        """).utf8)
+    }
+
+    func testTransitionLookupPrefersExactThenWildcardThenNothing() throws {
+        let manifest = try XCTUnwrap(CompanionManifest.decode(manifestJSON(transitions: """
+        [{"from":"*","to":"kangel","dir":"t/any","frames":4,"fps":12},
+         {"from":"ame","to":"kangel","dir":"t/exact","frames":4,"fps":12},
+         {"from":"*","to":"streamer","dir":"t/stream","frames":2,"fps":12,"reverse":true}]
+        """)))
+        XCTAssertEqual(manifest.transition(from: "ame", to: "kangel")?.dir, "t/exact")
+        XCTAssertEqual(manifest.transition(from: "streamer", to: "kangel")?.dir, "t/any")
+        XCTAssertEqual(manifest.transition(from: "ame", to: "streamer")?.dir, "t/stream")
+        XCTAssertNil(manifest.transition(from: "ame", to: "dark_angel"))
+        XCTAssertNil(manifest.transition(from: "kangel", to: "kangel"), "no change, no cutscene")
+    }
+
+    func testTransitionFramesPlayBackwardsWhenReversed() throws {
+        let forward = CompanionTransition(from: "a", to: "b", dir: "t", frames: 4, fps: 2)
+        let backward = CompanionTransition(from: "a", to: "b", dir: "t", frames: 4, fps: 2, reverse: true)
+        XCTAssertEqual(forward.order, [0, 1, 2, 3])
+        XCTAssertEqual(backward.order, [3, 2, 1, 0])
+        XCTAssertEqual(forward.position(elapsed: 0), 0)
+        XCTAssertEqual(forward.position(elapsed: 0.6), 1)
+        XCTAssertEqual(forward.position(elapsed: 1.99), 3)
+        XCTAssertNil(forward.position(elapsed: 2), "over after the last frame; it never loops")
+        XCTAssertEqual(forward.duration, 2)
+    }
+
+    func testDecodeSkipsBadTransitions() throws {
+        let manifest = try XCTUnwrap(CompanionManifest.decode(manifestJSON(transitions: """
+        [{"from":"ame","to":"a","dir":"t/ok","frames":3,"fps":12},
+         {"from":"ame","to":"b","dir":"../escape","frames":3,"fps":12},
+         {"from":"ame","to":"c","dir":"/abs","frames":3,"fps":12},
+         {"from":"ame","to":"d","dir":"t/zero","frames":0,"fps":12},
+         {"from":"ame","to":"e","dir":"t/fast","frames":3,"fps":999},
+         {"from":"ame","to":"*","dir":"t/star","frames":3,"fps":12},
+         {"from":"ame","dir":"t/missing-to","frames":3,"fps":12},
+         "junk"]
+        """)))
+        XCTAssertEqual(manifest.transitions.map(\.dir), ["t/ok"])
+        let none = try XCTUnwrap(CompanionManifest.decode(manifestJSON(transitions: "42")))
+        XCTAssertEqual(none.transitions, [], "a malformed list is just no cutscenes")
+    }
+
+    func testMissingTransitionFoldersAreDropped() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("wooloo-trans-\(UUID())")
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("t/here"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let manifest = try XCTUnwrap(CompanionManifest.decode(manifestJSON(transitions: """
+        [{"from":"ame","to":"a","dir":"t/here","frames":3,"fps":12},
+         {"from":"ame","to":"b","dir":"t/gone","frames":3,"fps":12}]
+        """)))
+        XCTAssertEqual(manifest.droppingMissingTransitions(in: root).transitions.map(\.dir), ["t/here"])
+    }
+
+    func testTransitionPreferenceDefaultsOn() throws {
+        let suite = "CompanionTransitionPrefTests-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertTrue(CompanionPreferences.playsTransitions(defaults: defaults))
+        defaults.set(false, forKey: CompanionPreferences.transitionsKey)
+        XCTAssertFalse(CompanionPreferences.playsTransitions(defaults: defaults))
+    }
 }

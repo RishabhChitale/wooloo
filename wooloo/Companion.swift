@@ -68,6 +68,55 @@ struct CompanionSkinChoice: Equatable, Sendable {
     let label: String
 }
 
+/// A cutscene played when the skin changes: full-scene frames `<dir>/000.png`….
+struct CompanionTransition: Decodable, Equatable, Sendable {
+    /// A skin id, or "*" for any skin.
+    let from: String
+    let to: String
+    let dir: String
+    let frames: Int
+    let fps: Double
+    let reverse: Bool
+
+    enum CodingKeys: String, CodingKey { case from, to, dir, frames, fps, reverse }
+
+    init(from: String, to: String, dir: String, frames: Int, fps: Double, reverse: Bool = false) {
+        self.from = from
+        self.to = to
+        self.dir = dir
+        self.frames = frames
+        self.fps = fps
+        self.reverse = reverse
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        from = try values.decode(String.self, forKey: .from)
+        to = try values.decode(String.self, forKey: .to)
+        dir = try values.decode(String.self, forKey: .dir)
+        frames = try values.decode(Int.self, forKey: .frames)
+        fps = try values.decode(Double.self, forKey: .fps)
+        reverse = (try? values.decodeIfPresent(Bool.self, forKey: .reverse)) ?? false
+    }
+
+    var isValid: Bool {
+        !from.isEmpty && !to.isEmpty && to != "*" && frames > 0 && frames <= 600 && fps > 0 && fps <= 60
+            && CompanionBackground.isSafe(dir)
+    }
+
+    var duration: Double { Double(frames) / fps }
+
+    /// The frame file numbers in the order they are shown.
+    var order: [Int] { reverse ? Array((0..<frames).reversed()) : Array(0..<frames) }
+
+    /// Which frame to show `elapsed` seconds in; nil once the cutscene is over.
+    func position(elapsed: TimeInterval) -> Int? {
+        guard elapsed >= 0 else { return 0 }
+        let position = Int(elapsed * fps)
+        return position < frames ? position : nil
+    }
+}
+
 struct CompanionSticker: Decodable, Equatable, Sendable, Identifiable {
     let id: String
     let label: String
@@ -96,6 +145,8 @@ extension CompanionManifest {
         font = try? values.decodeIfPresent(String.self, forKey: .font)
         skins = ((try? values.decodeIfPresent([String: Lossy<CompanionSkin>].self, forKey: .skins)) ?? nil)?
             .compactMapValues(\.value) ?? [:]
+        transitions = ((try? values.decodeIfPresent([Lossy<CompanionTransition>].self, forKey: .transitions)) ?? nil)?
+            .compactMap(\.value) ?? []
     }
 }
 
@@ -134,9 +185,11 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
     let font: String?
     /// Other looks for the webcam, by id ("streamer", "dark_angel"…); the top-level `moods` are Ame's.
     let skins: [String: CompanionSkin]
+    /// Cutscenes for skin changes.
+    var transitions: [CompanionTransition] = []
 
     enum CodingKeys: String, CodingKey {
-        case version, size, moods, lines, background, activities, stickers, font, skins
+        case version, size, moods, lines, background, activities, stickers, font, skins, transitions
         case spriteRect = "sprite_rect"
     }
 
@@ -152,7 +205,7 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
     /// nil when the file is missing, not a version 1 manifest, or has no usable sequence.
     static func load(from directory: URL) -> CompanionManifest? {
         guard let data = try? Data(contentsOf: directory.appendingPathComponent("manifest.json")) else { return nil }
-        return decode(data)
+        return decode(data)?.droppingMissingTransitions(in: directory)
     }
 
     static func decode(_ data: Data) -> CompanionManifest? {
@@ -175,7 +228,28 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
                                      let usable = skin.moods.mapValues { $0.filter(\.isValid) }
                                      return usable.values.contains(where: { !$0.isEmpty })
                                          ? CompanionSkin(label: skin.label, moods: usable) : nil
-                                 })
+                                 },
+                                 transitions: manifest.transitions.filter(\.isValid))
+    }
+
+    /// The cutscene for changing from skin `old` to `new`: an exact match first, then one from
+    /// any skin ("*"), else none.
+    func transition(from old: String, to new: String) -> CompanionTransition? {
+        guard old != new else { return nil }
+        return transitions.first { $0.from == old && $0.to == new }
+            ?? transitions.first { $0.from == "*" && $0.to == new }
+    }
+
+    /// The same manifest without the cutscenes whose folder is missing in `directory`.
+    func droppingMissingTransitions(in directory: URL) -> CompanionManifest {
+        var copy = self
+        copy.transitions = transitions.filter { transition in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent(transition.dir).path, isDirectory: &isDirectory)
+                && isDirectory.boolValue
+        }
+        return copy
     }
 
     static let defaultSkin = "ame"
@@ -741,6 +815,12 @@ final class CompanionModel: ObservableObject {
     private var dialogueInFlight = false
     private var directory = CompanionManifest.directory
     private var currentSkin: String?
+    /// The cutscene being played, if any. Changes only when one starts or ends.
+    @Published private(set) var cutscene: CompanionCutscene?
+    /// Decoded cutscene frames by file number; only the ones about to play are kept.
+    private var cutsceneImages: [Int: CGImage] = [:]
+    private var cutsceneLoading: Set<Int> = []
+    private var lastCutsceneImage: CGImage?
 
     /// Loading starts at creation: the view shows nothing until the manifest is in, so an
     /// `onAppear` on that empty content would never fire.
@@ -775,9 +855,16 @@ final class CompanionModel: ObservableObject {
         let skin = manifest.skins.isEmpty ? nil : manifest.resolvedSkin(skin)
         if skin != currentSkin {
             // Another skin: the old one's frames are not needed any more.
+            let old = currentSkin
             currentSkin = skin
             loaded = [:]
             loading = loading.filter { $0.hasPrefix("image:") }
+            if let old, let skin, CompanionPreferences.playsTransitions(),
+               let transition = manifest.transition(from: old, to: skin) {
+                startCutscene(transition)
+            } else {
+                endCutscene()
+            }
         }
         statusTimer.observe(status ?? mood.rawValue, now: now)
         let candidate = CompanionEmotionRules.resolve(mood: mood, signals: signals, textTime: textTime,
@@ -929,6 +1016,91 @@ final class CompanionModel: ObservableObject {
         }
     }
 
+    // MARK: Skin change cutscenes
+
+    private func startCutscene(_ transition: CompanionTransition) {
+        cutsceneImages = [:]
+        cutsceneLoading = []
+        lastCutsceneImage = nil
+        cutscene = CompanionCutscene(transition: transition, token: UUID(), requestedAt: Date(), startedAt: nil)
+        prefetchCutscene(from: 0)
+    }
+
+    private func endCutscene() {
+        guard cutscene != nil else { return }
+        cutscene = nil
+        cutsceneImages = [:]
+        cutsceneLoading = []
+        lastCutsceneImage = nil
+    }
+
+    /// Starts the clock once the first frame is decoded, moves on, keeps the next frames coming and
+    /// lets the finished ones go; ends the cutscene after its last frame.
+    func tickCutscene(now: Date) {
+        guard var current = cutscene else { return }
+        let order = current.transition.order
+        guard let first = order.first else { endCutscene(); return }
+        guard let started = current.startedAt else {
+            if cutsceneImages[first] != nil {
+                current.startedAt = now
+                cutscene = current
+            } else if now.timeIntervalSince(current.requestedAt) > CompanionCutscene.loadTimeout {
+                endCutscene()
+            } else {
+                prefetchCutscene(from: 0)
+            }
+            return
+        }
+        guard let position = current.transition.position(elapsed: now.timeIntervalSince(started)) else {
+            endCutscene()
+            return
+        }
+        prefetchCutscene(from: position)
+        let keep = Set(order[position..<min(order.count, position + Self.cutscenePrefetch)])
+        for key in cutsceneImages.keys where !keep.contains(key) { cutsceneImages[key] = nil }
+    }
+
+    /// The frame to show at `now`: the newest decoded one at or before the playing position.
+    func cutsceneImage(at now: Date) -> CGImage? {
+        guard let current = cutscene, let started = current.startedAt,
+              let position = current.transition.position(elapsed: now.timeIntervalSince(started)) else { return nil }
+        if let image = cutsceneImages[current.transition.order[position]] {
+            lastCutsceneImage = image
+            return image
+        }
+        return lastCutsceneImage
+    }
+
+    private static let cutscenePrefetch = 16
+
+    private func prefetchCutscene(from position: Int) {
+        guard let current = cutscene else { return }
+        let order = current.transition.order
+        let folder = directory.appendingPathComponent(current.transition.dir, isDirectory: true)
+        let token = current.token
+        for file in order[min(position, order.count)..<min(order.count, position + Self.cutscenePrefetch)]
+        where cutsceneImages[file] == nil && cutsceneLoading.insert(file).inserted {
+            Task {
+                let image = await Task.detached(priority: .utility) {
+                    Self.loadCutsceneFrame(in: folder, number: file)
+                }.value
+                guard self.cutscene?.token == token else { return }
+                self.cutsceneLoading.remove(file)
+                if let image { self.cutsceneImages[file] = image }
+            }
+        }
+    }
+
+    /// `000.png`-style names first, then plain numbers.
+    nonisolated private static func loadCutsceneFrame(in folder: URL, number: Int) -> CGImage? {
+        for name in [String(format: "%03d.png", number), "\(number).png"] {
+            let url = folder.appendingPathComponent(name)
+            if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) { return image }
+        }
+        return nil
+    }
+
     private func ensureLoaded(_ sequence: CompanionSequence) {
         guard loaded[sequence.dir] == nil, loading.insert(sequence.dir).inserted else { return }
         let folder = directory.appendingPathComponent(sequence.dir, isDirectory: true)
@@ -945,6 +1117,17 @@ final class CompanionModel: ObservableObject {
             self.loading.remove(sequence.dir)
         }
     }
+}
+
+/// A cutscene in progress: `startedAt` is set once its first frame is ready.
+struct CompanionCutscene: Equatable, Sendable {
+    let transition: CompanionTransition
+    let token: UUID
+    let requestedAt: Date
+    var startedAt: Date?
+
+    /// A first frame that has not come after this long means the cutscene cannot play.
+    static let loadTimeout: TimeInterval = 3
 }
 
 enum CompanionFontLoader {
@@ -976,13 +1159,10 @@ struct CompanionView: View {
 
     var body: some View {
         let mood = CompanionMood(agentStatus: commander?.agentStatus)
-        TimelineView(.animation(minimumInterval: 1 / (model.player.sequence?.fps ?? 10))) { context in
+        TimelineView(.animation(minimumInterval: 1 / max(model.player.sequence?.fps ?? 10,
+                                                         model.cutscene?.transition.fps ?? 0))) { context in
             VStack(spacing: 6) {
-                CompanionScene(background: model.backgroundImage(at: context.date),
-                               spriteRect: model.manifest?.spriteRect,
-                               sprite: model.image(at: context.date),
-                               spriteVisible: model.image(at: context.date).flatMap { model.visibleBounds(of: $0) },
-                               zoom: CompanionPreferences.clampedZoom(zoom))
+                room(at: context.date)
                 .frame(height: CompanionPreferences.roomHeight(width: width, factor: heightFactor))
                 .overlay(alignment: .bottom) {
                     // A thin grab strip along the bottom edge; dragging down makes the room taller.
@@ -1014,6 +1194,7 @@ struct CompanionView: View {
             }
             .onChange(of: context.date) { _, date in
                 model.advance(now: date, mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus)
+                model.tickCutscene(now: date)
                 model.refreshDialogue(sessionID: commander?.agentSessionID, now: date)
                 model.refreshAme(sessionID: ame?.agentSessionID, now: date)
                 if let store { model.tickNudge(now: date, ame: ame, commanderStatus: commander?.agentStatus, store: store) }
@@ -1024,6 +1205,47 @@ struct CompanionView: View {
             .onAppear { model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus) }
         }
         .accessibilityHidden(true)
+    }
+}
+
+extension CompanionView {
+    /// The scene, or a skin-change cutscene frame in its place (no sprite, no zoom).
+    @ViewBuilder
+    fileprivate func room(at date: Date) -> some View {
+        if model.cutscene != nil {
+            if let frame = model.cutsceneImage(at: date) {
+                CompanionCutsceneFrame(image: frame)
+            } else {
+                // The first frame is still being decoded: the empty room, without her.
+                CompanionScene(background: model.backgroundImage(at: date),
+                               spriteRect: model.manifest?.spriteRect, sprite: nil, zoom: 1)
+            }
+        } else {
+            CompanionScene(background: model.backgroundImage(at: date),
+                           spriteRect: model.manifest?.spriteRect,
+                           sprite: model.image(at: date),
+                           spriteVisible: model.image(at: date).flatMap { model.visibleBounds(of: $0) },
+                           zoom: CompanionPreferences.clampedZoom(zoom))
+        }
+    }
+}
+
+/// A full-scene cutscene frame, filling the room like the background: bottom-centered, cropped.
+struct CompanionCutsceneFrame: View {
+    let image: CGImage
+
+    var body: some View {
+        GeometryReader { area in
+            let size = CGSize(width: image.width, height: image.height)
+            let scale = CompanionScene.fillScale(content: size, in: area.size)
+            Image(decorative: image, scale: 1)
+                .interpolation(.none)
+                .resizable()
+                .frame(width: size.width * scale, height: size.height * scale)
+                .frame(width: area.size.width, height: area.size.height, alignment: .bottom)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
