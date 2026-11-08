@@ -78,11 +78,23 @@ extension HerdrStore {
     var selectedPanes: [HerdrPane] { panes(inTab: selectedTabID) }
 }
 
+/// Whether the left sidebar is open at launch and in new windows: hidden until the user shows it,
+/// and then as they left it.
+enum LeftSidebarPreference {
+    static let key = "leftSidebarVisible"
+
+    static func isVisible(defaults: UserDefaults = .standard) -> Bool { defaults.bool(forKey: key) }
+
+    static func set(_ visible: Bool, defaults: UserDefaults = .standard) { defaults.set(visible, forKey: key) }
+}
+
 /// The main window's own state: sidebars, sheets, the Search tab and the rename or close
 /// waiting for confirmation. `ContentView` renders it and `ContentCommands` changes it.
 @MainActor
 final class ContentWindowModel: ObservableObject {
-    @Published var showsSidebar = true
+    @Published var showsSidebar = LeftSidebarPreference.isVisible() {
+        didSet { LeftSidebarPreference.set(showsSidebar) }
+    }
     @Published var showsFilesSidebar = true
     @Published var showsSessionPicker = false
     @Published var showsSettings = false

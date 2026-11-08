@@ -690,6 +690,7 @@ final class ContentCommandsTests: XCTestCase {
         XCTAssertTrue(window.settingsShowRemoteAccess)
         XCTAssertFalse(window.settingsShowShortcuts)
 
+        window.showsSidebar = true
         commands.perform("toggle_sidebar")
         XCTAssertFalse(window.showsSidebar)
         commands.perform("toggle_files_sidebar")
@@ -764,5 +765,16 @@ final class ContentCommandsTests: XCTestCase {
         commands.perform("switch_tab_2")
         commands.perform("copy_pane_cwd")
         XCTAssertEqual(copied, ["/tmp/project"], "A pane without a directory copies nothing")
+    }
+
+    func testLeftSidebarStartsHiddenAndRemembersTheLastChoice() throws {
+        let suite = "LeftSidebarTests-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertFalse(LeftSidebarPreference.isVisible(defaults: defaults), "hidden on a first launch")
+        LeftSidebarPreference.set(true, defaults: defaults)
+        XCTAssertTrue(LeftSidebarPreference.isVisible(defaults: defaults))
+        LeftSidebarPreference.set(false, defaults: defaults)
+        XCTAssertFalse(LeftSidebarPreference.isVisible(defaults: defaults))
     }
 }

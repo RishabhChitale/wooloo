@@ -244,6 +244,7 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertEqual(window.commandPalette.results.count, 5, "the sidebars, the file explorer, GitHub and line wrapping")
         commands.perform(.commandPalette)
         XCTAssertEqual(window.commandPalette.selection, 1, "⇧⌘P again selects the next command")
+        window.showsSidebar = true
         window.commandPalette.query = "toggle sidebar"
         XCTAssertEqual(window.commandPalette.selectedMatch?.item.action, "toggle_sidebar")
         commands.runCommandPaletteSelection()
