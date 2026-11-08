@@ -1520,4 +1520,47 @@ final class CompanionTests: XCTestCase {
         defaults.set(false, forKey: CompanionPreferences.ambientKey)
         XCTAssertFalse(CompanionPreferences.ambientEnabled(defaults: defaults))
     }
+
+    // MARK: Instant switching and a steady camera
+
+    func testSkinCameraIgnoresFullCanvasFramesAndNeedsNoSequence() {
+        let pose = CGRect(x: 0.3, y: 0.2, width: 0.2, height: 0.6)
+        let wide = CGRect(x: 0.5, y: 0.3, width: 0.3, height: 0.5)
+        let background = CGRect(x: 0, y: 0, width: 0.95, height: 0.97)
+        let union = CompanionSprite.union([pose, nil, background, wide], ignoringFullCanvas: true)
+        XCTAssertEqual(union, pose.union(wide), "a frame that is all background does not widen it")
+        XCTAssertEqual(CompanionSprite.union([background], ignoringFullCanvas: true), nil)
+        XCTAssertEqual(CompanionSprite.union([background], ignoringFullCanvas: false), background)
+        // Tall but narrow, or wide but short, still counts.
+        XCTAssertNotNil(CompanionSprite.union([CGRect(x: 0, y: 0, width: 0.5, height: 1)], ignoringFullCanvas: true))
+    }
+
+    func testCameraSequencesAreTheSkinsOwnBaseAndEmotionClips() throws {
+        let json = #"""
+        {"version":1,"size":[1,1],"moods":{"idle":[{"dir":"a/idle","frames":2,"fps":4,"loop":true}],
+         "working":[{"dir":"a/work","frames":2,"fps":4,"loop":true}],"game":[{"dir":"a/game","frames":2,"fps":4,"loop":true}]},
+         "skins":{"x":{"label":"X","moods":{"idle":[{"dir":"x/idle","frames":2,"fps":4,"loop":true},{"dir":"x/idle2","frames":2,"fps":4,"loop":true}],
+         "sad":[{"dir":"x/sad","frames":2,"fps":4,"loop":true}],"tweet":[{"dir":"x/tweet","frames":2,"fps":4,"loop":true}]}}}}
+        """#
+        let manifest = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8)))
+        XCTAssertEqual(Set(manifest.cameraSequences(skin: "x").map(\.dir)), ["x/idle", "x/idle2", "x/sad"],
+                       "no other skin's clips, no activity or ambient clips, no repeats")
+        XCTAssertEqual(manifest.cameraSequences(skin: "x"), manifest.cameraSequences(skin: "x"))
+        XCTAssertEqual(Set(manifest.cameraSequences(skin: nil).map(\.dir)), ["a/idle", "a/work"])
+    }
+
+    func testSampledFramesSpreadOverTheClip() {
+        XCTAssertEqual(CompanionSprite.sampleIndices(frames: 0), [])
+        XCTAssertEqual(CompanionSprite.sampleIndices(frames: 3), [0, 1, 2])
+        XCTAssertEqual(CompanionSprite.sampleIndices(frames: 80), [0, 10, 20, 30, 40, 50, 60, 70])
+    }
+
+    func testFrameIndexClampsToTheDecodedPrefix() {
+        XCTAssertNil(CompanionFrames.index(3, loadedCount: 0), "nothing decoded yet")
+        XCTAssertEqual(CompanionFrames.index(0, loadedCount: 1), 0, "the first frame alone is enough")
+        XCTAssertEqual(CompanionFrames.index(7, loadedCount: 1), 0, "holds the last decoded frame")
+        XCTAssertEqual(CompanionFrames.index(7, loadedCount: 5), 4)
+        XCTAssertEqual(CompanionFrames.index(2, loadedCount: 5), 2)
+        XCTAssertEqual(CompanionFrames.index(-3, loadedCount: 5), 0)
+    }
 }

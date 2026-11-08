@@ -304,6 +304,17 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
             ?? transitions.first { $0.from == "*" && $0.to == new }
     }
 
+    /// The animations the camera is fitted to, whichever one is playing: the base and emotion
+    /// moods the skin has of its own.
+    static let cameraKeys = ["working", "idle", "done", "waiting", "angry", "stressed", "sad", "crying", "scared", "love"]
+
+    func cameraSequences(skin: String?) -> [CompanionSequence] {
+        var seen: Set<String> = []
+        return Self.cameraKeys.filter { hasOwnSequences(forKey: $0, skin: skin) }
+            .flatMap { sequences(forKey: $0, skin: skin) }
+            .filter { seen.insert($0.dir).inserted }
+    }
+
     /// The same manifest without the cutscenes whose folder is missing in `directory`.
     func droppingMissingTransitions(in directory: URL) -> CompanionManifest {
         var copy = self
@@ -567,9 +578,6 @@ struct CompanionPlayer {
         playingKey = identity
         return changed
     }
-
-    /// Starts the sequence's clock again, for when its frames finished loading after it was chosen.
-    mutating func restartClock(now: Date) { sequenceStart = now }
 
     /// The frame to show at `now`: a loop wraps, a one-shot holds its last frame, a blink or
     /// gesture follows its own timing.
@@ -1074,6 +1082,12 @@ actor CompanionTranscriptReader {
 /// Decoded frames, which `CompanionModel` keeps for the sequences it has played.
 struct CompanionFrames: @unchecked Sendable {
     let images: [CGImage]
+
+    /// The frame to show for the wanted number when only `loadedCount` frames are decoded so far:
+    /// the last decoded one past the end; nil only while none is decoded.
+    static func index(_ wanted: Int, loadedCount: Int) -> Int? {
+        loadedCount > 0 ? min(max(0, wanted), loadedCount - 1) : nil
+    }
 }
 
 @MainActor
@@ -1123,16 +1137,16 @@ final class CompanionModel: ObservableObject {
     private var lastWorked: Date?
     /// The last sprite shown, kept on screen while the next sequence's frames load.
     private var lastImage: CGImage?
-    private var shownDir: String?
     private var sequenceChangedAt = Date.distantPast
-    private var fadeFrom: CGImage?
-    private var fadeStart = Date.distantPast
-    static let crossfadeDuration: TimeInterval = 0.15
     static let holdLastImage: TimeInterval = 1
-    /// For each loaded sequence folder, the union of its frames' visible parts; the zoom is
-    /// centered on it, so it stays put while the frames change.
-    @Published private(set) var sequenceBounds: [String: CGRect] = [:]
-    private var boundsRequested: Set<String> = []
+    /// Sequence folders whose frames are all decoded; the others hold only their first frame, or
+    /// the part decoded so far.
+    private var loadedFully: Set<String> = []
+    /// For each skin, the part of the picture she occupies over all her base and emotion
+    /// animations; the zoom is centered on it, so no animation moves or rescales her.
+    @Published private(set) var skinBounds: [String: CGRect] = [:]
+    private var skinBoundsRequested: Set<String> = []
+    private var lastCamera: CGRect?
     /// The cutscene being played, if any. Changes only when one starts or ends.
     @Published private(set) var cutscene: CompanionCutscene?
     /// Decoded cutscene frames by file number; only the ones about to play are kept.
@@ -1176,6 +1190,7 @@ final class CompanionModel: ObservableObject {
             let old = currentSkin
             currentSkin = skin
             loaded = [:]
+            loadedFully = []
             loading = loading.filter { $0.hasPrefix("image:") }
             if let old, let skin, CompanionPreferences.playsTransitions(),
                let transition = manifest.transition(from: old, to: skin) {
@@ -1223,11 +1238,18 @@ final class CompanionModel: ObservableObject {
         let before = player.sequence
         let changedPlayer = next.advance(now: now, mood: mood, manifest: manifest, sequenceKey: key, skin: skin,
                                          lineKey: lineKey,
-                                         isLoaded: { [loadedDirs = Set(loaded.keys)] in loadedDirs.contains($0.dir) })
+                                         isLoaded: { [fully = loadedFully] in fully.contains($0.dir) })
         if changedPlayer || next.upcoming != player.upcoming { player = next }
         if next.sequence != before { sequenceChangedAt = now }
         if let sequence = next.sequence { ensureLoaded(sequence) }
         if let upcoming = next.upcoming { ensureLoaded(upcoming) }
+        // Only the sequence in play and the next variant stay decoded.
+        let wanted = Set([next.sequence?.dir, next.upcoming?.dir].compactMap { $0 })
+        if !loaded.keys.allSatisfy(wanted.contains) {
+            loaded = loaded.filter { wanted.contains($0.key) }
+            loadedFully = loadedFully.intersection(wanted)
+        }
+        ensureSkinBounds(skin: skin ?? CompanionManifest.defaultSkin, manifest: manifest)
         if let path = manifest.backgroundPath(at: now) { ensureImage(path) }
         publishMood(key, skin: skin ?? CompanionManifest.defaultSkin, now: now)
     }
@@ -1387,15 +1409,13 @@ final class CompanionModel: ObservableObject {
         return bounds
     }
 
-    /// The sprite frame to show. Never nothing while another sequence loads: the last frame stays
-    /// (for up to a second), and a new sequence starts from its first frame once it is loaded.
+    /// The sprite frame to show: a new sequence has its first frame at once, and a frame that is
+    /// not decoded yet shows the last one that is. The previous sprite stays only if even the
+    /// first frame cannot be read.
     func image(at now: Date) -> CGImage? {
-        if let sequence = player.sequence, let frames = loaded[sequence.dir]?.images, !frames.isEmpty {
-            let image = frames[min(player.frameIndex(at: now), frames.count - 1)]
-            if sequence.dir != shownDir {
-                if let lastImage { fadeFrom = lastImage; fadeStart = now }
-                shownDir = sequence.dir
-            }
+        if let sequence = player.sequence, let frames = loaded[sequence.dir]?.images,
+           let index = CompanionFrames.index(player.frameIndex(at: now), loadedCount: frames.count) {
+            let image = frames[index]
             lastImage = image
             return image
         }
@@ -1403,12 +1423,11 @@ final class CompanionModel: ObservableObject {
         return nil
     }
 
-    /// The sprite that is fading out after a sequence change, and how opaque it still is.
-    func fadingOutImage(at now: Date) -> (image: CGImage, opacity: Double)? {
-        guard let fadeFrom else { return nil }
-        let progress = now.timeIntervalSince(fadeStart) / Self.crossfadeDuration
-        guard progress >= 0, progress < 1 else { return nil }
-        return (fadeFrom, 1 - progress)
+    /// The part of the picture to center the zoom on: this skin's, else the last known one.
+    func camera() -> CGRect? {
+        let bounds = skinBounds[currentSkin ?? CompanionManifest.defaultSkin]
+        if let bounds { lastCamera = bounds }
+        return bounds ?? lastCamera
     }
 
     private func ensureImage(_ path: String) {
@@ -1509,32 +1528,52 @@ final class CompanionModel: ObservableObject {
     }
 
     private func ensureLoaded(_ sequence: CompanionSequence) {
-        guard loaded[sequence.dir] == nil, loading.insert(sequence.dir).inserted else { return }
         let folder = directory.appendingPathComponent(sequence.dir, isDirectory: true)
+        // The first frame is read here and now (one PNG), so a new sequence is drawn in the same
+        // pass; the rest follows in the background.
+        if loaded[sequence.dir] == nil,
+           let first = Self.readFrame(folder.appendingPathComponent("0.png")) {
+            loaded[sequence.dir] = CompanionFrames(images: [first])
+        }
+        guard !loadedFully.contains(sequence.dir), loading.insert(sequence.dir).inserted else { return }
         let count = sequence.frames
+        let dir = sequence.dir
         Task {
             let frames = await Task.detached(priority: .utility) { () -> CompanionFrames in
-                CompanionFrames(images: (0..<count).compactMap { index in
-                    let url = folder.appendingPathComponent("\(index).png")
-                    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-                    return CGImageSourceCreateImageAtIndex(source, 0, nil)
-                })
+                CompanionFrames(images: (0..<count).compactMap { Self.readFrame(folder.appendingPathComponent("\($0).png")) })
             }.value
-            self.loaded[sequence.dir] = frames
-            self.loading.remove(sequence.dir)
-            // The sequence in play starts from its first frame, not somewhere in the middle.
-            if self.player.sequence?.dir == sequence.dir { self.player.restartClock(now: Date()) }
-            self.computeBounds(for: sequence.dir, frames: frames)
+            self.loading.remove(dir)
+            // Dropped while it loaded (another sequence took over): leave it out.
+            let wanted = Set([self.player.sequence?.dir, self.player.upcoming?.dir].compactMap { $0 })
+            guard wanted.contains(dir), !frames.images.isEmpty else { return }
+            self.loaded[dir] = frames
+            self.loadedFully.insert(dir)
         }
     }
 
-    private func computeBounds(for dir: String, frames: CompanionFrames) {
-        guard boundsRequested.insert(dir).inserted else { return }
+    nonisolated private static func readFrame(_ url: URL) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+
+    /// Finds, once per skin, the part of the picture she occupies in her base and emotion
+    /// animations. Frames are read from disk as small thumbnails, one at a time, and dropped.
+    private func ensureSkinBounds(skin: String, manifest: CompanionManifest) {
+        guard skinBoundsRequested.insert(skin).inserted else { return }
+        let sequences = manifest.cameraSequences(skin: skin == CompanionManifest.defaultSkin && manifest.skins.isEmpty ? nil : skin)
+        let root = directory
         Task {
-            let union = await Task.detached(priority: .utility) {
-                CompanionSprite.union(frames.images.map { CompanionSprite.visibleBounds(of: $0) })
+            let bounds = await Task.detached(priority: .utility) { () -> CGRect? in
+                var found: [CGRect?] = []
+                for sequence in sequences {
+                    for index in CompanionSprite.sampleIndices(frames: sequence.frames) {
+                        let url = root.appendingPathComponent(sequence.dir).appendingPathComponent("\(index).png")
+                        found.append(CompanionSprite.thumbnailBounds(at: url))
+                    }
+                }
+                return CompanionSprite.union(found, ignoringFullCanvas: true)
             }.value
-            if let union { self.sequenceBounds[dir] = union }
+            if let bounds { self.skinBounds[skin] = bounds }
         }
     }
 }
@@ -1647,9 +1686,7 @@ extension CompanionView {
             CompanionScene(background: model.backgroundImage(at: date),
                            spriteRect: model.manifest?.spriteRect,
                            sprite: model.image(at: date),
-                           spriteVisible: model.player.sequence.flatMap { model.sequenceBounds[$0.dir] },
-                           outgoing: model.fadingOutImage(at: date)?.image,
-                           outgoingOpacity: model.fadingOutImage(at: date)?.opacity ?? 0,
+                           spriteVisible: model.camera(),
                            zoom: CompanionPreferences.clampedZoom(zoom))
         }
     }
@@ -1682,9 +1719,6 @@ struct CompanionScene: View {
     let sprite: CGImage?
     /// The part of the sprite image that is not transparent, as 0...1 fractions (top-left origin).
     var spriteVisible: CGRect?
-    /// The previous sequence's last frame, fading out over the new one.
-    var outgoing: CGImage?
-    var outgoingOpacity: Double = 0
     /// The whole scene is magnified by this much around her sprite's center.
     var zoom: Double = 1
 
@@ -1753,15 +1787,6 @@ struct CompanionScene: View {
                         .resizable()
                         .frame(width: size.width * scale, height: size.height * scale)
                     if let sprite {
-                        if let outgoing, outgoingOpacity > 0 {
-                            Image(decorative: outgoing, scale: 1)
-                                .interpolation(.none)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: rect[2] * scale, height: rect[3] * scale)
-                                .offset(x: rect[0] * scale, y: rect[1] * scale)
-                                .opacity(outgoingOpacity)
-                        }
                         Image(decorative: sprite, scale: 1)
                             .interpolation(.none)
                             .resizable()
@@ -1772,7 +1797,6 @@ struct CompanionScene: View {
                 }
                 .frame(width: size.width * scale, height: size.height * scale)
                 .scaleEffect(zoom, anchor: anchor)
-                .animation(.easeInOut(duration: 0.35), value: anchor)
                 // Bottom-center: the extra width is cropped evenly left and right, the extra
                 // height at the top, so the picture always reaches every edge of the room.
                 .frame(width: area.size.width, height: area.size.height, alignment: .bottom)
@@ -1787,7 +1811,6 @@ struct CompanionScene: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(width: area.size.width, height: area.size.height)
                     .scaleEffect(zoom, anchor: spriteAnchor)
-                    .animation(.easeInOut(duration: 0.35), value: spriteAnchor)
                     .clipped()
             }
         }
@@ -1832,9 +1855,30 @@ private struct CompanionBubble: View {
 
 /// Facts about a sprite frame's pixels.
 enum CompanionSprite {
-    /// The smallest rectangle holding all the rectangles; nil when there are none.
-    static func union(_ rects: [CGRect?]) -> CGRect? {
-        rects.compactMap { $0 }.reduce(nil) { (total: CGRect?, rect) in total.map { $0.union(rect) } ?? rect }
+    /// The smallest rectangle holding all the rectangles; nil when there are none. With
+    /// `ignoringFullCanvas`, a rectangle covering more than 90% of both the width and the height
+    /// (a frame that is all background) is left out.
+    static func union(_ rects: [CGRect?], ignoringFullCanvas: Bool = false) -> CGRect? {
+        rects.compactMap { $0 }
+            .filter { !(ignoringFullCanvas && $0.width > 0.9 && $0.height > 0.9) }
+            .reduce(nil) { (total: CGRect?, rect) in total.map { $0.union(rect) } ?? rect }
+    }
+
+    /// Up to eight frame numbers spread over a clip.
+    static func sampleIndices(frames: Int) -> [Int] {
+        guard frames > 0 else { return [] }
+        let count = min(frames, 8)
+        return Array(Set((0..<count).map { $0 * frames / count })).sorted()
+    }
+
+    /// The visible part of a PNG on disk as 0...1 fractions, found on a small thumbnail so the
+    /// full image is never kept.
+    static func thumbnailBounds(at url: URL) -> CGRect? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                        kCGImageSourceThumbnailMaxPixelSize: 256]
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return visibleBounds(of: thumbnail)
     }
 
     /// The smallest rectangle, in 0...1 fractions of the image with the origin at the top left,
