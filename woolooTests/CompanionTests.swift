@@ -1390,24 +1390,23 @@ final class CompanionTests: XCTestCase {
     // MARK: Ambient behaviours
 
     private func ambientRun(_ entries: [CompanionAmbient], baseMood: String = "idle", skinHas: @escaping (String) -> Bool = { _ in true },
-                            hour: Int = 14, idle: Double = 0, seed: UInt64 = 1, seconds: Int = 600) -> [String?] {
+                            hearts: Double = 50, seed: UInt64 = 1, seconds: Int = 600) -> [String?] {
         var scheduler = CompanionAmbientScheduler(seed: seed)
         var playing: [String?] = []
         for second in 0..<seconds {
             playing.append(scheduler.update(now: now0.addingTimeInterval(Double(second)), context: "ctx", baseMood: baseMood,
-                                            entries: entries, skinHas: skinHas, minutesIdle: idle, hour: hour))
+                                            entries: entries, skinHas: skinHas, hearts: hearts))
         }
         return playing
     }
 
     func testAmbientWaitsThenPlaysThenRestsAndNeverRepeatsAtOnce() {
         let entries = [CompanionAmbient(key: "tweet", moods: ["idle"]), CompanionAmbient(key: "tv", moods: ["idle"])]
-        let run = ambientRun(entries, seconds: 1200)
+        let run = ambientRun(entries, hearts: 100, seconds: 1200)
         let firstStart = run.firstIndex { $0 != nil }
         XCTAssertNotNil(firstStart)
-        XCTAssertGreaterThanOrEqual(firstStart ?? 0, 25, "waits at least 25 s")
+        XCTAssertGreaterThanOrEqual(firstStart ?? 0, 25, "waits at least 25 s at full hearts")
         XCTAssertLessThanOrEqual(firstStart ?? 999, 61)
-        // Split into plays and check lengths, rests and that no key follows itself.
         var plays: [(key: String, start: Int, end: Int)] = []
         for (second, key) in run.enumerated() {
             guard let key else { continue }
@@ -1422,12 +1421,64 @@ final class CompanionTests: XCTestCase {
         }
     }
 
+    func testAmbientDwellAndCooldownScaleWithHearts() {
+        let dwell = { (hearts: Double) in CompanionAmbientScheduler.scaled(CompanionAmbientScheduler.dwellAtZero,
+                                                                           CompanionAmbientScheduler.dwellAtFull, hearts: hearts) }
+        let cooldown = { (hearts: Double) in CompanionAmbientScheduler.scaled(CompanionAmbientScheduler.cooldownAtZero,
+                                                                              CompanionAmbientScheduler.cooldownAtFull, hearts: hearts) }
+        XCTAssertEqual(dwell(0), 90...180)
+        XCTAssertEqual(dwell(100), 25...60)
+        XCTAssertEqual(dwell(50).lowerBound, 57.5, accuracy: 0.001)
+        XCTAssertEqual(dwell(50).upperBound, 120, accuracy: 0.001)
+        XCTAssertEqual(cooldown(0), 180...300)
+        XCTAssertEqual(cooldown(100), 30...90)
+        XCTAssertEqual(cooldown(50).lowerBound, 105, accuracy: 0.001)
+        XCTAssertEqual(dwell(-20), dwell(0), "clamped")
+        XCTAssertEqual(dwell(500), dwell(100), "clamped")
+        let entries = [CompanionAmbient(key: "tweet", moods: ["idle"])]
+        let empty = ambientRun(entries, hearts: 0, seconds: 400).firstIndex { $0 != nil }
+        XCTAssertGreaterThanOrEqual(empty ?? 0, 90, "no hearts: at least 90 s before the first clip")
+        XCTAssertLessThanOrEqual(empty ?? 999, 181)
+    }
+
+    func testAmbientEligibilityFollowsTheHeartsTiers() {
+        let entry = CompanionAmbient(key: "tv", moods: ["idle"], minHearts: 50, maxHearts: 80)
+        for hearts in [50.0, 65, 80] { XCTAssertTrue(entry.fits(hearts: hearts), "\(hearts)") }
+        for hearts in [0.0, 49.9, 80.1, 100] { XCTAssertFalse(entry.fits(hearts: hearts), "\(hearts)") }
+        XCTAssertTrue(CompanionAmbient(key: "tweet", moods: ["idle"]).fits(hearts: 0), "no limits: any level")
+        XCTAssertTrue(CompanionAmbient(key: "tweet", moods: ["idle"]).fits(hearts: 100))
+        XCTAssertTrue(ambientRun([entry], hearts: 20, seconds: 800).allSatisfy { $0 == nil })
+        XCTAssertTrue(ambientRun([entry], hearts: 60, seconds: 800).contains { $0 == "tv" })
+    }
+
+    func testAmbientHasNoTimeOfDayLogic() throws {
+        // Old manifests may still carry hours and idle minutes; they are ignored, not honoured.
+        let json = #"""
+        {"version":1,"size":[1,1],"moods":{"idle":[{"dir":"i","frames":1,"fps":4,"loop":true}]},
+         "ambient":[{"key":"out","moods":["idle"],"weight":1,"hours":[9,17],"minIdleMinutes":30,"either":true}]}
+        """#
+        let manifest = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8)))
+        let entry = try XCTUnwrap(manifest.ambient.first)
+        XCTAssertTrue(entry.fits(hearts: 50))
+        // The scheduler takes no clock hour, so the same seed gives the same run at any time of day.
+        XCTAssertEqual(ambientRun([entry], seed: 5), ambientRun([entry], seed: 5))
+    }
+
+    func testSleepIsNeverAnAmbientClip() throws {
+        let json = #"""
+        {"version":1,"size":[1,1],"moods":{"idle":[{"dir":"i","frames":1,"fps":4,"loop":true}]},
+         "ambient":[{"key":"sleep","moods":["idle"],"weight":1},{"key":"tweet","moods":["idle"],"weight":1}]}
+        """#
+        let manifest = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8)))
+        XCTAssertEqual(manifest.ambient.map(\.key), ["tweet"])
+    }
+
     func testAmbientNeedsACalmBaseMoodASkinClipAndAMatchingMood() {
         let tweet = [CompanionAmbient(key: "tweet", moods: ["idle", "done"])]
         XCTAssertTrue(ambientRun(tweet, baseMood: "working").allSatisfy { $0 == nil })
         XCTAssertTrue(ambientRun(tweet, baseMood: "love").allSatisfy { $0 == nil })
         XCTAssertTrue(ambientRun(tweet, baseMood: "waiting").allSatisfy { $0 == nil }, "waiting is not in its moods")
-        XCTAssertTrue(ambientRun(tweet, baseMood: "done").contains { $0 == "tweet" })
+        XCTAssertTrue(ambientRun(tweet, baseMood: "done", hearts: 100).contains { $0 == "tweet" })
         XCTAssertTrue(ambientRun(tweet, skinHas: { $0 != "tweet" }).allSatisfy { $0 == nil }, "a skin without the clip skips it")
         XCTAssertTrue(ambientRun([]).allSatisfy { $0 == nil })
     }
@@ -1437,80 +1488,45 @@ final class CompanionTests: XCTestCase {
         let entries = [CompanionAmbient(key: "tv", moods: ["idle"])]
         var t = now0
         var playingAt: Date?
-        for _ in 0..<200 {
+        for _ in 0..<400 {
             t = t.addingTimeInterval(1)
             if scheduler.update(now: t, context: "a", baseMood: "idle", entries: entries, skinHas: { _ in true },
-                                minutesIdle: 0, hour: 12) != nil { playingAt = t; break }
+                                hearts: 100) != nil { playingAt = t; break }
         }
         XCTAssertNotNil(playingAt, "it started")
         XCTAssertNil(scheduler.update(now: t.addingTimeInterval(1), context: "b", baseMood: "idle", entries: entries,
-                                      skinHas: { _ in true }, minutesIdle: 0, hour: 12), "mood or skin changed")
-        // Back in the old context it waits again from the start.
+                                      skinHas: { _ in true }, hearts: 100), "mood or skin changed")
         XCTAssertNil(scheduler.update(now: t.addingTimeInterval(2), context: "a", baseMood: "idle", entries: entries,
-                                      skinHas: { _ in true }, minutesIdle: 0, hour: 12))
+                                      skinHas: { _ in true }, hearts: 100))
         XCTAssertNil(scheduler.update(now: t.addingTimeInterval(3), context: "a", baseMood: nil, entries: entries,
-                                      skinHas: { _ in true }, minutesIdle: 0, hour: 12), "not allowed")
+                                      skinHas: { _ in true }, hearts: 100), "not allowed")
         XCTAssertEqual(scheduler.phase, .idle)
     }
 
-    func testAmbientHoursWrapPastMidnight() {
-        let night = CompanionAmbient(key: "sleep", moods: ["idle"], hours: [23, 6])
-        for hour in [23, 0, 3, 5] { XCTAssertTrue(night.fits(hour: hour, minutesIdle: 0), "\(hour)") }
-        for hour in [6, 12, 22] { XCTAssertFalse(night.fits(hour: hour, minutesIdle: 0), "\(hour)") }
-        let day = CompanionAmbient(key: "out", moods: ["idle"], hours: [9, 17])
-        XCTAssertTrue(day.fits(hour: 9, minutesIdle: 0))
-        XCTAssertFalse(day.fits(hour: 17, minutesIdle: 0))
-        XCTAssertTrue(ambientRun([night], hour: 2).contains { $0 == "sleep" })
-        XCTAssertTrue(ambientRun([night], hour: 14).allSatisfy { $0 == nil })
-    }
-
-    func testAmbientEitherAndBothConditions() {
-        let both = CompanionAmbient(key: "sleep", moods: ["idle"], hours: [23, 6], minIdleMinutes: 30)
-        let either = CompanionAmbient(key: "sleep", moods: ["idle"], hours: [23, 6], minIdleMinutes: 30, either: true)
-        XCTAssertFalse(both.fits(hour: 2, minutesIdle: 5))
-        XCTAssertFalse(both.fits(hour: 14, minutesIdle: 60))
-        XCTAssertTrue(both.fits(hour: 2, minutesIdle: 60))
-        XCTAssertTrue(either.fits(hour: 2, minutesIdle: 5))
-        XCTAssertTrue(either.fits(hour: 14, minutesIdle: 60))
-        XCTAssertFalse(either.fits(hour: 14, minutesIdle: 5))
-        XCTAssertTrue(CompanionAmbient(key: "tweet", moods: ["idle"]).fits(hour: 4, minutesIdle: 0), "no conditions: always")
-    }
-
     func testAmbientPicksByWeight() {
-        var scheduler = CompanionAmbientScheduler(seed: 42)
         let entries = [CompanionAmbient(key: "rare", moods: ["idle"], weight: 1), CompanionAmbient(key: "common", moods: ["idle"], weight: 9)]
-        var counts: [String: Int] = [:]
-        for _ in 0..<2000 {
-            if let picked = scheduler.pick(baseMood: "idle", entries: entries, skinHas: { _ in true }, minutesIdle: 0, hour: 12) {
-                counts[picked.key, default: 0] += 1
-            }
-        }
-        // The last key is excluded each time, so check the weights through a fresh scheduler.
         var single = 0
         for seed in 0..<500 {
             var fresh = CompanionAmbientScheduler(seed: UInt64(seed))
-            if fresh.pick(baseMood: "idle", entries: entries, skinHas: { _ in true }, minutesIdle: 0, hour: 12)?.key == "common" { single += 1 }
+            if fresh.pick(baseMood: "idle", entries: entries, skinHas: { _ in true }, hearts: 50)?.key == "common" { single += 1 }
         }
         XCTAssertTrue((400...490).contains(single), "about 90% common: \(single)")
-        XCTAssertGreaterThan(counts.count, 0)
     }
 
     func testAmbientDecodeIsLossyAndKeepsOnlyValidEntries() throws {
         let json = #"""
         {"version":1,"size":[1,1],"moods":{"idle":[{"dir":"i","frames":1,"fps":4,"loop":true}]},
-         "ambient":[{"key":"tweet","moods":["idle","done"],"weight":2,"hours":[9,23],"minIdleMinutes":5,"either":true},
-                    {"key":"sleep","moods":["idle"],"weight":1,"hours":[23,6],"extra":"ignored"},
+         "ambient":[{"key":"tweet","moods":["idle","done"],"weight":2,"minHearts":30,"maxHearts":90},
+                    {"key":"tv","moods":["idle"],"weight":1,"extra":"ignored"},
                     {"key":"bad","moods":["idle"],"weight":0},
                     {"key":"nomoods","moods":[],"weight":1},
                     {"key":"../x","moods":["idle"],"weight":1},
-                    {"key":"hours","moods":["idle"],"weight":1,"hours":[1,2,3]},
                     {"moods":["idle"],"weight":1}, "junk"]}
         """#
         let manifest = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8)))
-        XCTAssertEqual(manifest.ambient.map(\.key), ["tweet", "sleep"])
-        XCTAssertEqual(manifest.ambient.first?.either, true)
-        XCTAssertEqual(manifest.ambient.first?.hours, [9, 23])
-        XCTAssertEqual(manifest.ambient.first?.minIdleMinutes, 5)
+        XCTAssertEqual(manifest.ambient.map(\.key), ["tweet", "tv"])
+        XCTAssertEqual(manifest.ambient.first?.minHearts, 30)
+        XCTAssertEqual(manifest.ambient.first?.maxHearts, 90)
     }
 
     func testAmbientPreferenceDefaultsOn() throws {
@@ -1519,6 +1535,395 @@ final class CompanionTests: XCTestCase {
         XCTAssertTrue(CompanionPreferences.ambientEnabled(defaults: defaults))
         defaults.set(false, forKey: CompanionPreferences.ambientKey)
         XCTAssertFalse(CompanionPreferences.ambientEnabled(defaults: defaults))
+    }
+
+    // MARK: Headpats
+
+    private typealias Reaction = CompanionHeadpat.Reaction
+    private typealias Step = CompanionHeadpat.Step
+
+    private var idleReaction: [String: Reaction] {
+        ["idle": Reaction(hover: "happy", steps: [Step(pats: 3, key: "done"), Step(pats: 8, key: "love"), Step(pats: 1, key: "idle")],
+                          lines: ["hehe", "more!"])]
+    }
+
+    func testHeadpatStepIsTheHighestAtMostTheCount() {
+        let steps = idleReaction["idle"]!.steps
+        XCTAssertEqual(CompanionHeadpat.step(for: 1, in: steps)?.key, "idle")
+        XCTAssertEqual(CompanionHeadpat.step(for: 2, in: steps)?.key, "idle")
+        XCTAssertEqual(CompanionHeadpat.step(for: 3, in: steps)?.key, "done")
+        XCTAssertEqual(CompanionHeadpat.step(for: 7, in: steps)?.key, "done")
+        XCTAssertEqual(CompanionHeadpat.step(for: 8, in: steps)?.key, "love")
+        XCTAssertEqual(CompanionHeadpat.step(for: 99, in: steps)?.key, "love")
+        XCTAssertNil(CompanionHeadpat.step(for: 0, in: steps))
+        XCTAssertNil(CompanionHeadpat.step(for: 2, in: [Step(pats: 3, key: "done")]), "below the first step: the base mood")
+    }
+
+    func testHeadpatSessionEndsAfterTwentySecondsAndRestartsOnTheCurrentMood() {
+        var session = CompanionHeadpatSession()
+        XCTAssertEqual(session.pat(now: now0, base: "idle", reactions: idleReaction, pick: { _ in 0 }), 1)
+        XCTAssertEqual(session.pat(now: now0.addingTimeInterval(20), base: "idle", reactions: idleReaction, pick: { _ in 0 }), 2,
+                       "exactly 20 s later is still the same session")
+        XCTAssertEqual(session.pat(now: now0.addingTimeInterval(40), base: "idle", reactions: idleReaction, pick: { _ in 0 }), 3)
+        XCTAssertEqual(session.reachedKey, "done")
+        XCTAssertEqual(session.pat(now: now0.addingTimeInterval(61), base: "love", reactions: idleReaction, pick: { _ in 0 }), 1,
+                       "more than 20 s: a new session")
+        XCTAssertEqual(session.base, "love")
+        XCTAssertNil(session.reachedKey, "no reaction for the new base")
+    }
+
+    func testHeadpatMoodHoldsFiveMinutesThenReverts() {
+        var session = CompanionHeadpatSession()
+        for i in 0..<3 { session.pat(now: now0.addingTimeInterval(Double(i)), base: "idle", reactions: idleReaction, pick: { _ in 0 }) }
+        let last = now0.addingTimeInterval(2)
+        XCTAssertEqual(session.overrideKey(now: last.addingTimeInterval(299), ameMoodTime: nil), "done")
+        XCTAssertNil(session.overrideKey(now: last.addingTimeInterval(300), ameMoodTime: nil))
+        XCTAssertTrue(session.isEngaged(now: last.addingTimeInterval(10), ameMoodTime: nil))
+    }
+
+    func testHeadpatOnTopOfWorkingLastsFourSecondsForDone() {
+        let working = ["working": Reaction(steps: [Step(pats: 1, key: "done")])]
+        var session = CompanionHeadpatSession()
+        session.pat(now: now0, base: "working", reactions: working)
+        XCTAssertEqual(session.overrideKey(now: now0.addingTimeInterval(3), ameMoodTime: nil), "done")
+        XCTAssertNil(session.overrideKey(now: now0.addingTimeInterval(4), ameMoodTime: nil))
+        // Another key on top of working keeps the long hold.
+        let other = ["working": Reaction(steps: [Step(pats: 1, key: "love")])]
+        var kept = CompanionHeadpatSession()
+        kept.pat(now: now0, base: "working", reactions: other)
+        XCTAssertEqual(kept.overrideKey(now: now0.addingTimeInterval(100), ameMoodTime: nil), "love")
+    }
+
+    func testANewerJineReplyReplacesTheHeadpatMoodAndLatestWins() {
+        var session = CompanionHeadpatSession()
+        for i in 0..<3 { session.pat(now: now0.addingTimeInterval(Double(i)), base: "idle", reactions: idleReaction, pick: { _ in 0 }) }
+        let older = now0.addingTimeInterval(1)
+        let newer = now0.addingTimeInterval(10)
+        XCTAssertEqual(session.overrideKey(now: now0.addingTimeInterval(20), ameMoodTime: older), "done", "an older reply does not")
+        XCTAssertNil(session.overrideKey(now: now0.addingTimeInterval(20), ameMoodTime: newer))
+        // A pat after her reply wins again.
+        session.pat(now: now0.addingTimeInterval(12), base: "idle", reactions: idleReaction, pick: { _ in 0 })
+        XCTAssertEqual(session.overrideKey(now: now0.addingTimeInterval(13), ameMoodTime: newer), "done")
+    }
+
+    func testHeadpatLineShowsForSixSecondsOnANewStepOnly() {
+        var session = CompanionHeadpatSession()
+        session.pat(now: now0, base: "idle", reactions: idleReaction, pick: { _ in 1 })
+        XCTAssertEqual(session.bubbleLine(now: now0.addingTimeInterval(5.9)), "more!", "step 1 reached")
+        XCTAssertNil(session.bubbleLine(now: now0.addingTimeInterval(6)))
+        session.pat(now: now0.addingTimeInterval(7), base: "idle", reactions: idleReaction, pick: { _ in 0 })
+        XCTAssertNil(session.bubbleLine(now: now0.addingTimeInterval(7.5)), "same step: no new line")
+        session.pat(now: now0.addingTimeInterval(8), base: "idle", reactions: idleReaction, pick: { _ in 0 })
+        XCTAssertEqual(session.bubbleLine(now: now0.addingTimeInterval(8.5)), "hehe", "step 3 reached")
+    }
+
+    func testHeadpatBubbleComesBeforeCommanderDialogue() throws {
+        let player = CompanionPlayer()
+        XCTAssertEqual(player.bubbleText(dialogue: "from the commander", title: nil, override: "hehe"), "hehe")
+        XCTAssertEqual(player.bubbleText(dialogue: "from the commander", title: nil, override: nil), "from the commander")
+    }
+
+    func testThirdPatAlsoPlaysTheThirdSound() {
+        let sounds = CompanionHeadpat.Sounds(pat: "s/pat.wav", third: "s/third.wav")
+        XCTAssertEqual(CompanionHeadpatSound.paths(count: 1, sounds: sounds), ["s/pat.wav"])
+        XCTAssertEqual(CompanionHeadpatSound.paths(count: 2, sounds: sounds), ["s/pat.wav"])
+        XCTAssertEqual(CompanionHeadpatSound.paths(count: 3, sounds: sounds), ["s/pat.wav", "s/third.wav"])
+        XCTAssertEqual(CompanionHeadpatSound.paths(count: 6, sounds: sounds), ["s/pat.wav", "s/third.wav"])
+        XCTAssertEqual(CompanionHeadpatSound.paths(count: 4, sounds: sounds), ["s/pat.wav"])
+    }
+
+    func testHeadpatSoundsPreferenceDefaultsOn() throws {
+        let (defaults, cleanup) = try isolatedDefaults()
+        defer { cleanup() }
+        XCTAssertTrue(CompanionPreferences.headpatSoundsEnabled(defaults: defaults))
+        defaults.set(false, forKey: CompanionPreferences.headpatSoundsKey)
+        XCTAssertFalse(CompanionPreferences.headpatSoundsEnabled(defaults: defaults))
+    }
+
+    func testHeadRectFollowsTheSceneTransformAtSeveralZooms() throws {
+        // Background 200x100, sprite rect = the whole background, sprite image 100x100, room 100x100.
+        let head = [10.0, 10, 20, 20]
+        func rect(_ zoom: Double) throws -> CGRect {
+            try XCTUnwrap(CompanionScene.headRect(head: head, imageSize: CGSize(width: 100, height: 100),
+                                                  background: CGSize(width: 200, height: 100),
+                                                  spriteRect: [0, 0, 200, 100], visible: nil,
+                                                  area: CGSize(width: 100, height: 100), zoom: zoom))
+        }
+        XCTAssertEqual(try rect(1), CGRect(x: 10, y: 10, width: 20, height: 20))
+        XCTAssertEqual(try rect(2), CGRect(x: -30, y: -30, width: 40, height: 40))
+        let big = try rect(2.5)
+        XCTAssertEqual(big.width, 50, accuracy: 0.001)
+        XCTAssertEqual(big.minX, -50, accuracy: 0.001)
+        XCTAssertEqual(big.minY, -50, accuracy: 0.001)
+    }
+
+    func testHeadRectWithoutABackgroundFitsTheSpriteIntoTheRoom() throws {
+        // Room 100x200, sprite 50x50 fitted to 100x100 at y 50.
+        let one = try XCTUnwrap(CompanionScene.headRect(head: [10, 10, 10, 10], imageSize: CGSize(width: 50, height: 50),
+                                                       background: nil, spriteRect: nil, visible: nil,
+                                                       area: CGSize(width: 100, height: 200), zoom: 1))
+        XCTAssertEqual(one, CGRect(x: 20, y: 70, width: 20, height: 20))
+        let two = try XCTUnwrap(CompanionScene.headRect(head: [10, 10, 10, 10], imageSize: CGSize(width: 50, height: 50),
+                                                       background: nil, spriteRect: nil, visible: nil,
+                                                       area: CGSize(width: 100, height: 200), zoom: 2))
+        XCTAssertEqual(two, CGRect(x: -10, y: 40, width: 40, height: 40))
+        XCTAssertNil(CompanionScene.headRect(head: [1, 2, 0, 5], imageSize: CGSize(width: 50, height: 50), background: nil,
+                                             spriteRect: nil, visible: nil, area: CGSize(width: 100, height: 100), zoom: 1))
+    }
+
+    func testHeadHitKeepsTheGearButtonAndTheResizeStrip() {
+        let area = CGSize(width: 100, height: 100)
+        let head = CGRect(x: 0, y: 0, width: 100, height: 100)
+        XCTAssertTrue(CompanionHeadpatHit.contains(CGPoint(x: 50, y: 50), head: head, area: area))
+        XCTAssertFalse(CompanionHeadpatHit.contains(CGPoint(x: 90, y: 10), head: head, area: area), "gear")
+        XCTAssertFalse(CompanionHeadpatHit.contains(CGPoint(x: 50, y: 96), head: head, area: area), "resize strip")
+        XCTAssertTrue(CompanionHeadpatHit.contains(CGPoint(x: 70, y: 10), head: head, area: area))
+        XCTAssertFalse(CompanionHeadpatHit.contains(CGPoint(x: 50, y: 50), head: nil, area: area))
+        XCTAssertFalse(CompanionHeadpatHit.contains(CGPoint(x: 50, y: 50), head: CGRect(x: 0, y: 0, width: 10, height: 10), area: area))
+    }
+
+    func testHeadpatManifestDecodesLossilyAndIsOffWhenAbsent() throws {
+        let off = try XCTUnwrap(CompanionManifest.decode(Data(manifestJSON.utf8)))
+        XCTAssertNil(off.headpat)
+        XCTAssertNil(off.hearts)
+        let json = #"""
+        {"version":1,"size":[1,1],"moods":{"idle":[{"dir":"i","frames":1,"fps":4,"loop":true}]},
+         "headpat":{"sounds":{"pat":"s/p.wav","third":"../evil.wav"},
+                    "heads":{"ame":[1,2,3,4],"bad":[1,2],"zero":[1,2,0,4]},
+                    "reactions":{"idle":{"hover":null,"steps":[[3,"done"],["x",1],[0,"zero"],[8,"love"]],"lines":["a",""]},
+                                 "junk":5}}}
+        """#
+        let on = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8))?.headpat)
+        XCTAssertEqual(on.sounds.pat, "s/p.wav")
+        XCTAssertNil(on.sounds.third, "an unsafe path is dropped")
+        XCTAssertEqual(Array(on.heads.keys), ["ame"])
+        XCTAssertNil(on.reactions["idle"]?.hover)
+        XCTAssertEqual(on.reactions["idle"]?.steps, [Step(pats: 3, key: "done"), Step(pats: 8, key: "love")])
+        XCTAssertEqual(on.reactions["idle"]?.lines, ["a"])
+        let broken = #"{"version":1,"size":[1,1],"moods":{"idle":[{"dir":"i","frames":1,"fps":4,"loop":true}]},"headpat":"nope"}"#
+        let manifest = try XCTUnwrap(CompanionManifest.decode(Data(broken.utf8)))
+        XCTAssertNil(manifest.headpat, "malformed: the feature is off, the rest still loads")
+    }
+
+    func testPatTurnsAreHiddenInTheJineListLikeNudges() {
+        let messages = [
+            CompanionMessage(role: .user, text: "[pat] P-chan gave you 5 headpats; you feel: loving", time: now0),
+            CompanionMessage(role: .assistant, text: "hehe", time: now0.addingTimeInterval(1)),
+            CompanionMessage(role: .user, text: "[nudge] it's Sunday", time: now0.addingTimeInterval(2)),
+            CompanionMessage(role: .user, text: "hello", time: now0.addingTimeInterval(3)),
+        ]
+        XCTAssertEqual(CompanionNudge.visible(messages).map(\.text), ["hehe", "hello"])
+        XCTAssertTrue(CompanionPatMessage.isPat("  [PAT] x"))
+        XCTAssertFalse(CompanionPatMessage.isPat("pat me"))
+    }
+
+    func testPatMessageTextAndTheTenMinuteLimit() {
+        XCTAssertEqual(CompanionPatMessage.text(count: 5, key: "love"), "[pat] P-chan gave you 5 headpats; you feel: loving")
+        XCTAssertEqual(CompanionPatMessage.text(count: 3, key: "done"), "[pat] P-chan gave you 3 headpats; you feel: happy")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let noon = calendar.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 12))!
+        func allowed(_ count: Int, sentAgo: TimeInterval? = nil, status: String? = "idle", at date: Date? = nil) -> Bool {
+            let now = date ?? noon
+            return CompanionPatMessage.allowed(count: count, lastSent: sentAgo.map { now.addingTimeInterval(-$0) }, now: now,
+                                               ameStatus: status, calendar: calendar)
+        }
+        XCTAssertTrue(allowed(3))
+        XCTAssertFalse(allowed(2), "needs three pats")
+        XCTAssertFalse(allowed(5, sentAgo: 599))
+        XCTAssertTrue(allowed(5, sentAgo: 600))
+        XCTAssertFalse(allowed(5, status: "working"))
+        XCTAssertFalse(allowed(5, status: "blocked"))
+        XCTAssertFalse(allowed(5, at: calendar.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 3))!), "quiet hours")
+    }
+
+    func testFinishedSessionOfThreeIsReportedOnce() {
+        var session = CompanionHeadpatSession()
+        for i in 0..<3 { session.pat(now: now0.addingTimeInterval(Double(i)), base: "idle", reactions: idleReaction, pick: { _ in 0 }) }
+        XCTAssertNil(session.takeEnded(now: now0.addingTimeInterval(10)), "still going")
+        XCTAssertEqual(session.takeEnded(now: now0.addingTimeInterval(23)), CompanionHeadpatSession.Report(count: 3, key: "done"))
+        XCTAssertNil(session.takeEnded(now: now0.addingTimeInterval(30)), "only once")
+        var short = CompanionHeadpatSession()
+        short.pat(now: now0, base: "idle", reactions: idleReaction)
+        short.pat(now: now0.addingTimeInterval(1), base: "idle", reactions: idleReaction)
+        XCTAssertNil(short.takeEnded(now: now0.addingTimeInterval(60)), "two pats are not reported")
+        // A new session right after a long one does not lose the report.
+        var long = CompanionHeadpatSession()
+        for i in 0..<4 { long.pat(now: now0.addingTimeInterval(Double(i)), base: "idle", reactions: idleReaction) }
+        long.pat(now: now0.addingTimeInterval(100), base: "idle", reactions: idleReaction)
+        XCTAssertEqual(long.takeEnded(now: now0.addingTimeInterval(101))?.count, 4)
+    }
+
+    // MARK: Hearts and the nap
+
+    private var heartsConfig: CompanionHearts {
+        let json = #"{"icon":"h.png","nap":{"key":"sleep","fallback":"love"},"decayPerHour":10}"#
+        return try! JSONDecoder().decode(CompanionHearts.self, from: Data(json.utf8))
+    }
+
+    private func reply(_ text: String, at seconds: Double) -> CompanionMessage {
+        CompanionMessage(role: .assistant, text: text, time: now0.addingTimeInterval(seconds))
+    }
+
+    private func said(_ text: String, at seconds: Double) -> CompanionMessage {
+        CompanionMessage(role: .user, text: text, time: now0.addingTimeInterval(seconds))
+    }
+
+    func testHeartsStartAtFortyAndDecayAcrossARelaunch() throws {
+        let (defaults, cleanup) = try isolatedDefaults()
+        defer { cleanup() }
+        let config = heartsConfig
+        var state = CompanionHeartsState.load(defaults: defaults, now: now0, config: config)
+        XCTAssertEqual(state.level, 40)
+        state.add(20, now: now0, config: config)
+        state.save(defaults: defaults)
+        let later = CompanionHeartsState.load(defaults: defaults, now: now0.addingTimeInterval(3 * 3600), config: config)
+        XCTAssertEqual(later.level, 30, accuracy: 0.001, "60 - 3 h x 10")
+        let long = CompanionHeartsState.load(defaults: defaults, now: now0.addingTimeInterval(100 * 3600), config: config)
+        XCTAssertEqual(long.level, 0, "never below zero")
+    }
+
+    func testHeartsGainsAndLossesFollowTheMood() {
+        let config = heartsConfig
+        XCTAssertEqual(config.delta(forAmeMood: "love"), 8)
+        XCTAssertEqual(config.delta(forAmeMood: "done"), 4)
+        XCTAssertEqual(config.delta(forAmeMood: "sad"), -5)
+        XCTAssertEqual(config.delta(forAmeMood: "crying"), -5)
+        XCTAssertEqual(config.delta(forAmeMood: "angry"), -8)
+        XCTAssertEqual(config.delta(forAmeMood: "idle"), 0)
+        XCTAssertEqual(config.delta(forAmeMood: nil), 0)
+        XCTAssertEqual(config.gains.pat, 4)
+        XCTAssertEqual(config.gains.userLove, 6)
+    }
+
+    func testEachJineMessageCountsOnceAcrossRelaunches() throws {
+        let (defaults, cleanup) = try isolatedDefaults()
+        defer { cleanup() }
+        let config = heartsConfig
+        let tag = { (message: CompanionMessage) in message.mood }
+        var state = CompanionHeartsState(now: now0)
+        let history = [reply("old [mood: love]", at: 1), said("i love you", at: 2)]
+        XCTAssertFalse(state.count(messages: history, ameMood: tag, loveExtra: [], now: now0, config: config))
+        XCTAssertEqual(state.level, 40, "the first sight only notes the newest, nothing is counted")
+        let more = history + [reply("so happy [mood: love]", at: 10), said("thanks!", at: 11), said("what time is it", at: 12),
+                              reply("so sad [mood: sad]", at: 13)]
+        state.count(messages: more, ameMood: tag, loveExtra: [], now: now0, config: config)
+        XCTAssertEqual(state.level, 40 + 8 + 6 - 5, "love reply, loving user message, sad reply")
+        state.count(messages: more, ameMood: tag, loveExtra: [], now: now0, config: config)
+        XCTAssertEqual(state.level, 49, "a second look counts nothing")
+        state.save(defaults: defaults)
+        var relaunched = CompanionHeartsState.load(defaults: defaults, now: now0, config: config)
+        relaunched.count(messages: more, ameMood: tag, loveExtra: [], now: now0, config: config)
+        XCTAssertEqual(relaunched.level, 49, "nor after a relaunch")
+        relaunched.count(messages: more + [reply("[mood: done]", at: 20)], ameMood: tag, loveExtra: [], now: now0, config: config)
+        XCTAssertEqual(relaunched.level, 53)
+    }
+
+    func testTheNapFiresOnlyOnTheUpwardEdgeAndRearmsBelowHundred() {
+        let config = heartsConfig
+        var state = CompanionHeartsState(now: now0)
+        XCTAssertFalse(state.add(50, now: now0, config: config), "40 -> 90")
+        XCTAssertTrue(state.add(10, now: now0, config: config), "90 -> 100 fires")
+        XCTAssertEqual(state.level, 100)
+        XCTAssertFalse(state.add(4, now: now0, config: config), "staying at 100 never refires")
+        XCTAssertFalse(state.add(0, now: now0, config: config))
+        XCTAssertEqual(state.level, 100, "the level stays at 100 afterwards")
+        // 6 minutes at 10 per hour is one point: 99, armed again.
+        let later = now0.addingTimeInterval(6 * 60)
+        state.decay(now: later, config: config)
+        XCTAssertEqual(state.level, 99, accuracy: 0.001)
+        XCTAssertTrue(state.add(4, now: later, config: config), "99 -> 100 fires again")
+        XCTAssertEqual(state.level, 100)
+    }
+
+    func testTheNapDoesNotFireOnLaunchAtHundred() throws {
+        let (defaults, cleanup) = try isolatedDefaults()
+        defer { cleanup() }
+        let config = heartsConfig
+        var full = CompanionHeartsState(now: now0)
+        full.add(60, now: now0, config: config)
+        full.save(defaults: defaults)
+        var launched = CompanionHeartsState.load(defaults: defaults, now: now0, config: config)
+        XCTAssertEqual(launched.level, 100)
+        XCTAssertFalse(launched.add(0, now: now0, config: config), "a launch at 100 fires nothing")
+        XCTAssertFalse(launched.add(5, now: now0, config: config))
+        XCTAssertEqual(launched.level, 100)
+        // Counting a message that would fill the bar from below fires; at 100 it does not.
+        var almost = CompanionHeartsState(now: now0)
+        almost.add(55, now: now0, config: config)
+        XCTAssertTrue(almost.count(messages: [reply("x", at: 0)], ameMood: { _ in "love" }, loveExtra: [], now: now0, config: config) == false,
+                      "the first sight counts nothing")
+        XCTAssertTrue(almost.count(messages: [reply("x", at: 0), reply("y", at: 5)], ameMood: { _ in "love" }, loveExtra: [],
+                                   now: now0, config: config), "95 + 8 reaches 100")
+    }
+
+    func testTheNapPlaysOneVariantOnceWithoutHoldsAndThenGoesBack() throws {
+        let json = #"""
+        {"version":1,"size":[1,1],
+         "moods":{"idle":[{"dir":"idle/0","frames":3,"fps":6,"loop":true}],
+                  "love":[{"dir":"love/0","frames":4,"fps":8,"loop":true,"style":"gesture"}]},
+         "skins":{"streamer":{"label":"S","moods":{"idle":[{"dir":"s/idle","frames":3,"fps":6,"loop":true}],
+                  "sleep":[{"dir":"s/sleep/0","frames":6,"fps":12,"loop":true,"style":"blink"},
+                           {"dir":"s/sleep/1","frames":6,"fps":12,"loop":true}]}}}}
+        """#
+        let manifest = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8)))
+        let nap = CompanionHearts.Nap(key: "sleep", fallback: "love")
+        // Own clip in the skin that has it, else the fallback.
+        XCTAssertEqual(CompanionNap.key(config: nap) { manifest.hasOwnSequences(forKey: $0, skin: "streamer") }, "sleep")
+        XCTAssertEqual(CompanionNap.key(config: nap) { manifest.hasOwnSequences(forKey: $0, skin: nil) }, "love")
+        XCTAssertNil(CompanionNap.key(config: CompanionHearts.Nap(key: "sleep", fallback: nil)) { _ in false })
+        let pass = try XCTUnwrap(CompanionNap.pass(key: "sleep", sequences: manifest.sequences(forKey: "sleep", skin: "streamer"),
+                                                   pick: { _ in 0 }))
+        XCTAssertEqual(pass.sequence.dir, "s/sleep/0")
+        XCTAssertFalse(pass.sequence.loop, "one pass, not looping")
+        XCTAssertFalse(pass.sequence.isStyled, "blink and gesture holds are ignored")
+        XCTAssertNil(CompanionNap.pass(key: "none", sequences: []))
+        // The pass plays frame 0 to the last at the clip's fps, then ends.
+        var player = CompanionPlayer()
+        player.advance(now: now0, mood: .idle, manifest: manifest, sequenceKey: "idle", skin: "streamer")
+        var started = pass
+        started.startedAt = now0.addingTimeInterval(1)
+        player.advance(now: now0.addingTimeInterval(1), mood: .idle, manifest: manifest, sequenceKey: "nap|sleep",
+                       skin: "streamer", onlySequence: pass.sequence)
+        XCTAssertEqual(player.sequence?.dir, "s/sleep/0", "starts at once")
+        XCTAssertEqual(player.frameIndex(at: now0.addingTimeInterval(1)), 0)
+        XCTAssertEqual(player.frameIndex(at: now0.addingTimeInterval(1.25)), 3)
+        XCTAssertEqual(player.frameIndex(at: now0.addingTimeInterval(1.6)), 5, "holds the last frame")
+        XCTAssertTrue(started.isActive(now: now0.addingTimeInterval(1.49)))
+        XCTAssertFalse(started.isActive(now: now0.addingTimeInterval(1.5)), "6 frames at 12 fps = 0.5 s")
+        // Straight back to what the mood says.
+        player.advance(now: now0.addingTimeInterval(1.5), mood: .idle, manifest: manifest, sequenceKey: "idle", skin: "streamer")
+        XCTAssertEqual(player.sequence?.dir, "s/idle")
+    }
+
+    func testHeartsManifestDecodesLossilyAndIsOffWhenAbsent() throws {
+        let json = #"""
+        {"version":1,"size":[1,1],"moods":{"idle":[{"dir":"i","frames":1,"fps":4,"loop":true}]},
+         "hearts":{"icon":"ui/heart.png","nap":{"key":"sleep","fallback":"love","minutes":4,"resetTo":70},
+                   "gains":{"pat":3,"jineLove":"x"},"losses":{"jineSad":2},"decayPerHour":12,"tiers":[1,2]}}
+        """#
+        let hearts = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8))?.hearts)
+        XCTAssertEqual(hearts.icon, "ui/heart.png")
+        XCTAssertEqual(hearts.nap.key, "sleep")
+        XCTAssertEqual(hearts.nap.fallback, "love")
+        XCTAssertEqual(hearts.gains.pat, 3)
+        XCTAssertEqual(hearts.gains.jineLove, 8, "a bad value falls back to its default")
+        XCTAssertEqual(hearts.losses.jineSad, 2)
+        XCTAssertEqual(hearts.losses.jineAngry, 8)
+        XCTAssertEqual(hearts.decayPerHour, 12)
+        let broken = #"{"version":1,"size":[1,1],"moods":{"idle":[{"dir":"i","frames":1,"fps":4,"loop":true}]},"hearts":7}"#
+        XCTAssertNil(try XCTUnwrap(CompanionManifest.decode(Data(broken.utf8))).hearts)
+    }
+
+    func testHeartsBarFillsInWholeSteps() {
+        XCTAssertEqual(CompanionHeartsBar.filled(level: 0), 0)
+        XCTAssertEqual(CompanionHeartsBar.filled(level: 4.9), 0)
+        XCTAssertEqual(CompanionHeartsBar.filled(level: 5), 1)
+        XCTAssertEqual(CompanionHeartsBar.filled(level: 40), 8)
+        XCTAssertEqual(CompanionHeartsBar.filled(level: 100), CompanionHeartsBar.steps)
+        XCTAssertEqual(CompanionHeartsBar.filled(level: 250), CompanionHeartsBar.steps)
+        XCTAssertEqual(CompanionHeartsBar.filled(level: .nan), 0)
+        XCTAssertEqual(CompanionNap.bubble, "zzz... ♡")
     }
 
     // MARK: Instant switching and a steady camera

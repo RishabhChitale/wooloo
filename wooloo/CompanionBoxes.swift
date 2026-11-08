@@ -23,6 +23,13 @@ enum CompanionPreferences {
     /// Whether she does things on her own while idle; on unless turned off.
     static let ambientKey = "companionAmbient"
 
+    /// Whether a pat plays its sound; on unless turned off.
+    static let headpatSoundsKey = "companionHeadpatSounds"
+
+    static func headpatSoundsEnabled(defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: headpatSoundsKey) as? Bool ?? true
+    }
+
     static func ambientEnabled(defaults: UserDefaults = .standard) -> Bool {
         defaults.object(forKey: ambientKey) as? Bool ?? true
     }
@@ -100,6 +107,7 @@ enum CompanionPalette {
     static let panel = Color(red: 0.97, green: 0.95, blue: 1.0)
     static let highlight = Color(red: 0.84, green: 0.76, blue: 0.98)
     static let messages = Color(red: 0.86, green: 0.93, blue: 1.0)
+    static let pink = Color(red: 1.0, green: 0.55, blue: 0.75)
 }
 
 enum CompanionFont {
@@ -211,6 +219,7 @@ struct CompanionWebcamSettings: View {
     @AppStorage(CompanionPreferences.transitionsKey) private var playsTransitions = true
     @AppStorage(CompanionPreferences.nudgesKey) private var nudges = true
     @AppStorage(CompanionPreferences.ambientKey) private var idleBehaviours = true
+    @AppStorage(CompanionPreferences.headpatSoundsKey) private var headpatSounds = true
     @Environment(\.woolooTypography) private var typography
 
     @State private var contentHeight: CGFloat = 0
@@ -238,6 +247,7 @@ struct CompanionWebcamSettings: View {
                         checkbox("Notify when Ame replies on JINE", isOn: $notifiesAme)
                         checkbox("Ame texts me on her own", isOn: $nudges)
                         checkbox("Idle behaviours", isOn: $idleBehaviours)
+                        checkbox("Headpat sounds", isOn: $headpatSounds)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background {

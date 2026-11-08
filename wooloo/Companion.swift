@@ -72,29 +72,25 @@ struct CompanionSkinChoice: Equatable, Sendable {
     let label: String
 }
 
-/// A thing she does on her own while idle: a clip key the skin may define (`tweet`, `sleep`…),
-/// the base moods it suits, how likely it is, and when it fits.
+/// A thing she does on her own while idle: a clip key the skin may define (`tweet`, `comics`…),
+/// the base moods it suits, how likely it is, and the hearts level it fits. The time of day plays
+/// no part. `sleep` is the nap's clip and never an ambient one.
 struct CompanionAmbient: Decodable, Equatable, Sendable {
     let key: String
     let moods: [String]
     let weight: Double
-    /// Start and end hour of the day it fits (the end excluded); the span may wrap midnight.
-    let hours: [Int]?
-    /// It fits once the commander has not worked for this many minutes.
-    let minIdleMinutes: Double?
-    /// With both conditions given: either one is enough (otherwise both are needed).
-    let either: Bool
+    /// It is eligible only while her hearts level is within these (0...100 when not given).
+    let minHearts: Double?
+    let maxHearts: Double?
 
-    enum CodingKeys: String, CodingKey { case key, moods, weight, hours, minIdleMinutes, either }
+    enum CodingKeys: String, CodingKey { case key, moods, weight, minHearts, maxHearts }
 
-    init(key: String, moods: [String], weight: Double = 1, hours: [Int]? = nil,
-         minIdleMinutes: Double? = nil, either: Bool = false) {
+    init(key: String, moods: [String], weight: Double = 1, minHearts: Double? = nil, maxHearts: Double? = nil) {
         self.key = key
         self.moods = moods
         self.weight = weight
-        self.hours = hours
-        self.minIdleMinutes = minIdleMinutes
-        self.either = either
+        self.minHearts = minHearts
+        self.maxHearts = maxHearts
     }
 
     init(from decoder: Decoder) throws {
@@ -102,28 +98,19 @@ struct CompanionAmbient: Decodable, Equatable, Sendable {
         key = try values.decode(String.self, forKey: .key)
         moods = (try? values.decodeIfPresent([String].self, forKey: .moods)) ?? []
         weight = try values.decode(Double.self, forKey: .weight)
-        hours = (try? values.decodeIfPresent([Int].self, forKey: .hours)) ?? nil
-        minIdleMinutes = (try? values.decodeIfPresent(Double.self, forKey: .minIdleMinutes)) ?? nil
-        either = (try? values.decodeIfPresent(Bool.self, forKey: .either)) ?? false
+        minHearts = (try? values.decodeIfPresent(Double.self, forKey: .minHearts)) ?? nil
+        maxHearts = (try? values.decodeIfPresent(Double.self, forKey: .maxHearts)) ?? nil
     }
 
     var isValid: Bool {
-        !key.isEmpty && key.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }
+        !key.isEmpty && key != "sleep" && key.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }
             && !moods.isEmpty && weight.isFinite && weight > 0
-            && (hours.map { $0.count == 2 && $0.allSatisfy { (0...24).contains($0) } } ?? true)
-            && (minIdleMinutes.map { $0.isFinite && $0 >= 0 } ?? true)
+            && (minHearts.map { $0.isFinite } ?? true) && (maxHearts.map { $0.isFinite } ?? true)
     }
 
-    /// Whether the hour and idle conditions allow it now; with none given it always does.
-    func fits(hour: Int, minutesIdle: Double) -> Bool {
-        var conditions: [Bool] = []
-        if let hours, hours.count == 2 {
-            let (start, end) = (hours[0], hours[1])
-            conditions.append(start <= end ? (start..<end).contains(hour) : (hour >= start || hour < end))
-        }
-        if let minIdleMinutes { conditions.append(minutesIdle >= minIdleMinutes) }
-        guard !conditions.isEmpty else { return true }
-        return either ? conditions.contains(true) : !conditions.contains(false)
+    /// Whether the hearts level allows it.
+    func fits(hearts: Double) -> Bool {
+        hearts >= (minHearts ?? 0) && hearts <= (maxHearts ?? 100)
     }
 }
 
@@ -208,6 +195,8 @@ extension CompanionManifest {
             .compactMap(\.value) ?? []
         ambient = ((try? values.decodeIfPresent([Lossy<CompanionAmbient>].self, forKey: .ambient)) ?? nil)?
             .compactMap(\.value) ?? []
+        headpat = ((try? values.decodeIfPresent(CompanionHeadpat.self, forKey: .headpat)) ?? nil)
+        hearts = ((try? values.decodeIfPresent(CompanionHearts.self, forKey: .hearts)) ?? nil)
     }
 }
 
@@ -250,9 +239,13 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
     var transitions: [CompanionTransition] = []
     /// What she does on her own while idle.
     var ambient: [CompanionAmbient] = []
+    /// Headpats and hearts; optional, and the feature is off without them.
+    var headpat: CompanionHeadpat?
+    var hearts: CompanionHearts?
 
     enum CodingKeys: String, CodingKey {
         case version, size, moods, lines, background, activities, stickers, font, skins, transitions, ambient
+        case headpat, hearts
         case spriteRect = "sprite_rect"
     }
 
@@ -293,7 +286,9 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
                                          ? CompanionSkin(label: skin.label, moods: usable) : nil
                                  },
                                  transitions: manifest.transitions.filter(\.isValid),
-                                 ambient: manifest.ambient.filter(\.isValid))
+                                 ambient: manifest.ambient.filter(\.isValid),
+                                 headpat: manifest.headpat.flatMap { $0.isUsable ? $0 : nil },
+                                 hearts: manifest.hearts.flatMap { $0.isUsable ? $0 : nil })
     }
 
     /// The cutscene for changing from skin `old` to `new`: an exact match first, then one from
@@ -524,6 +519,7 @@ struct CompanionPlayer {
     @discardableResult
     mutating func advance(now: Date, mood newMood: CompanionMood, manifest: CompanionManifest,
                           sequenceKey: String? = nil, skin: String? = nil, lineKey: String? = nil,
+                          onlySequence: CompanionSequence? = nil,
                           pick: (Int) -> Int = { Int.random(in: 0..<$0) },
                           isLoaded: (CompanionSequence) -> Bool = { _ in true }) -> Bool {
         var changed = false
@@ -550,7 +546,7 @@ struct CompanionPlayer {
             }
         }
         if due {
-            let choices = manifest.sequences(forKey: key, skin: skin)
+            let choices = onlySequence.map { [$0] } ?? manifest.sequences(forKey: key, skin: skin)
             // Not the same sequence twice in a row when there is another one.
             let others = choices.filter { $0 != sequence }
             let pool = others.isEmpty || moodChanged || keyChanged ? choices : others
@@ -593,7 +589,8 @@ struct CompanionPlayer {
 
     /// What the commander said, if its transcript gave anything; else, while working, its terminal
     /// title; else a line of the mood.
-    func bubbleText(dialogue: String? = nil, title: String?) -> String? {
+    func bubbleText(dialogue: String? = nil, title: String?, override: String? = nil) -> String? {
+        if let override, !override.isEmpty { return override }
         if let dialogue, !dialogue.isEmpty { return dialogue }
         if mood == .working, let title = title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
             return title
@@ -1134,7 +1131,17 @@ final class CompanionModel: ObservableObject {
     private var ambient = CompanionAmbientScheduler()
     private var ambientKey: String?
     private var baseKey: String?
-    private var lastWorked: Date?
+    // Headpats, hearts and the nap.
+    private var patSession = CompanionHeadpatSession()
+    private var hovering = false
+    private var effectiveKey: String?
+    private var lastArguments: (mood: CompanionMood, activityID: String?, skin: String?, status: String?)?
+    private var hearts: CompanionHeartsState?
+    private var napPass: CompanionNap.Pass?
+    private var patLastSent: Date?
+    /// The hearts level in whole steps of the bar, for the view.
+    @Published private(set) var heartsFilled = 0
+    @Published private(set) var heartsLevel = 0.0
     /// The last sprite shown, kept on screen while the next sequence's frames load.
     private var lastImage: CGImage?
     private var sequenceChangedAt = Date.distantPast
@@ -1172,7 +1179,8 @@ final class CompanionModel: ObservableObject {
             self.manifest = result.0
             if let manifest = result.0 {
                 let previews = manifest.skinChoices.compactMap { manifest.previewPath(skin: $0.id) }
-                for path in manifest.activities.map(\.icon) + manifest.stickers.map(\.image) + previews {
+                let heart = manifest.hearts?.icon.map { [$0] } ?? []
+                for path in manifest.activities.map(\.icon) + manifest.stickers.map(\.image) + previews + heart {
                     self.ensureImage(path)
                 }
             }
@@ -1183,12 +1191,14 @@ final class CompanionModel: ObservableObject {
     func advance(now: Date, mood: CompanionMood, activityID: String? = nil, skin: String? = nil,
                  status: String? = nil) {
         guard let manifest else { return }
+        lastArguments = (mood, activityID, skin, status)
         var next = player
         let skin = manifest.skins.isEmpty ? nil : manifest.resolvedSkin(skin)
         if skin != currentSkin {
             // Another skin: the old one's frames are not needed any more.
             let old = currentSkin
             currentSkin = skin
+            napPass = nil
             loaded = [:]
             loadedFully = []
             loading = loading.filter { $0.hasPrefix("image:") }
@@ -1221,23 +1231,55 @@ final class CompanionModel: ObservableObject {
                 key = wanted
             }
         }
-        // While idle she does her own things now and then; any change of mood, skin or activity,
-        // a cutscene, a game or stream activity, or the setting off, ends it.
-        if mood == .working { lastWorked = now }
         baseKey = key
+        effectiveKey = key
+        // Headpats: a reached mood replaces the sequence; hovering shows the reaction's hover key.
+        let usableKey: (String) -> String? = { candidate in
+            if let base = CompanionMood(rawValue: candidate) {
+                return manifest.sequenceKey(mood: base, activityID: activityID, skin: skin)
+            }
+            return manifest.hasOwnSequences(forKey: candidate, skin: skin) ? candidate : nil
+        }
+        // The nap pass outranks every sequence while it plays; a skin change or cutscene cancels it.
+        if let config = manifest.hearts { tickHearts(now: now, config: config) }
+        if cutscene != nil { napPass = nil }
+        if var pass = napPass {
+            if pass.startedAt == nil { pass.startedAt = now }
+            napPass = pass.isActive(now: now) ? pass : nil
+        }
+        let napping = napPass != nil
+        var patBusy = false
+        if let headpat = manifest.headpat, !napping {
+            if let reached = patSession.overrideKey(now: now, ameMoodTime: ameMoodTime), let resolved = usableKey(reached) {
+                key = resolved
+            } else if hovering, let hover = (headpat.reaction(for: effectiveKey ?? "") ?? headpat.reaction(for: mood.rawValue))?.hover,
+                      let resolved = usableKey(hover) {
+                key = resolved
+            }
+            patBusy = hovering || patSession.isEngaged(now: now, ameMoodTime: ameMoodTime)
+        }
+        // While idle she does her own things now and then, as often as her hearts allow; any change
+        // of mood, skin or activity, a cutscene, a pat, a nap, a game or stream activity, or the
+        // setting off, ends it.
         let calm = CompanionAmbientScheduler.baseMoods.contains(key) && (activityID ?? CompanionPreferences.defaultActivity)
             == CompanionPreferences.defaultActivity && cutscene == nil && CompanionPreferences.ambientEnabled()
+            && !napping && !patBusy
         let skinKeys = manifest
         let doing = ambient.update(
             now: now, context: "\(skin ?? "")|\(key)|\(activityID ?? "")|\(cutscene == nil)", baseMood: calm ? key : nil,
             entries: manifest.ambient, skinHas: { skinKeys.hasOwnSequences(forKey: $0, skin: skin) },
-            minutesIdle: lastWorked.map { now.timeIntervalSince($0) / 60 } ?? .infinity,
-            hour: Calendar.current.component(.hour, from: now))
+            hearts: hearts?.level ?? CompanionHeartsState.startLevel)
         ambientKey = doing
         if let doing { key = doing }
+        var passSequence: CompanionSequence?
+        if let pass = napPass {
+            // A key of its own, so the pass restarts the player even when the same mood is in play.
+            key = "nap|" + pass.key
+            passSequence = pass.sequence
+        }
         let before = player.sequence
         let changedPlayer = next.advance(now: now, mood: mood, manifest: manifest, sequenceKey: key, skin: skin,
-                                         lineKey: lineKey,
+                                         lineKey: lineKey, onlySequence: passSequence,
                                          isLoaded: { [fully = loadedFully] in fully.contains($0.dir) })
         if changedPlayer || next.upcoming != player.upcoming { player = next }
         if next.sequence != before { sequenceChangedAt = now }
@@ -1251,7 +1293,7 @@ final class CompanionModel: ObservableObject {
         }
         ensureSkinBounds(skin: skin ?? CompanionManifest.defaultSkin, manifest: manifest)
         if let path = manifest.backgroundPath(at: now) { ensureImage(path) }
-        publishMood(key, skin: skin ?? CompanionManifest.defaultSkin, now: now)
+        publishMood(napping ? (manifest.hearts?.nap.key ?? key) : key, skin: skin ?? CompanionManifest.defaultSkin, now: now)
     }
 
     private var publishedKey: String?
@@ -1268,6 +1310,115 @@ final class CompanionModel: ObservableObject {
         let url = CompanionMoodState.fileURL(companionDirectory: directory)
         let writer = stateWriter
         Task.detached(priority: .utility) { await writer.write(data, to: url) }
+    }
+
+    // MARK: Headpats, hearts and the nap
+
+    /// Loads the hearts level once, then decays it by wall time and publishes the bar.
+    private func tickHearts(now: Date, config: CompanionHearts) {
+        if hearts == nil { hearts = CompanionHeartsState.load(now: now, config: config) }
+        guard var state = hearts else { return }
+        let before = state
+        state.decay(now: now, config: config)
+        hearts = state
+        publishHearts(state)
+        if state != before, now.timeIntervalSince(heartsSaved) >= 5 {
+            state.save()
+            heartsSaved = now
+        }
+    }
+
+    private var heartsSaved = Date.distantPast
+
+    private func publishHearts(_ state: CompanionHeartsState) {
+        let filled = CompanionHeartsBar.filled(level: state.level)
+        if filled != heartsFilled { heartsFilled = filled }
+        let rounded = state.level.rounded()
+        if rounded != heartsLevel { heartsLevel = rounded }
+    }
+
+    /// Applies a change of the hearts level and saves it at once.
+    private func addHearts(_ delta: Double, now: Date) {
+        guard let config = manifest?.hearts else { return }
+        if hearts == nil { hearts = CompanionHeartsState.load(now: now, config: config) }
+        guard var state = hearts else { return }
+        let reachedFull = state.add(delta, now: now, config: config)
+        hearts = state
+        publishHearts(state)
+        state.save()
+        if reachedFull { startNap(config: config) }
+    }
+
+    /// The level just rose to 100: one pass of the nap clip, starting at the next advance.
+    private func startNap(config: CompanionHearts) {
+        guard cutscene == nil, let manifest else { return }
+        let skin = manifest.skins.isEmpty ? nil : currentSkin
+        guard let key = CompanionNap.key(config: config.nap, skinHas: { manifest.hasOwnSequences(forKey: $0, skin: skin) })
+        else { return }
+        napPass = CompanionNap.pass(key: key, sequences: manifest.sequences(forKey: key, skin: skin))
+    }
+
+    /// The pointer entered or left her head.
+    func setHovering(_ value: Bool) {
+        guard hovering != value else { return }
+        hovering = value
+        refresh()
+    }
+
+    /// Runs `advance` again with the last arguments, so a hover or a pat shows at once.
+    func refresh(now: Date = Date()) {
+        guard let last = lastArguments else { return }
+        advance(now: now, mood: last.mood, activityID: last.activityID, skin: last.skin, status: last.status)
+    }
+
+    /// One click on her head: sounds, the session and the mood steps, hearts.
+    func pat(now: Date = Date()) {
+        guard let manifest, let headpat = manifest.headpat else { return }
+        let count = patSession.pat(now: now, base: effectiveKey ?? "idle", reactions: headpat.reactions)
+        if CompanionPreferences.headpatSoundsEnabled() {
+            CompanionHeadpatSound.play(CompanionHeadpatSound.paths(count: count, sounds: headpat.sounds), in: directory)
+        }
+        addHearts(manifest.hearts?.gains.pat ?? 0, now: now)
+        refresh(now: now)
+    }
+
+    /// The speech bubble that comes before the commander's words: the nap, else a headpat line.
+    func patBubble(now: Date) -> String? {
+        if napPass?.isActive(now: now) == true { return CompanionNap.bubble }
+        return patSession.bubbleLine(now: now)
+    }
+
+    /// The hearts bar is shown when the manifest has hearts.
+    var showsHearts: Bool { manifest?.hearts != nil }
+    var heartsIcon: String? { manifest?.hearts?.icon }
+
+    /// The head in the room's coordinates now; nil during a cutscene or without art.
+    func headRect(area: CGSize, zoom: Double, now: Date) -> CGRect? {
+        guard cutscene == nil, let manifest, let headpat = manifest.headpat,
+              let head = headpat.head(forSkin: currentSkin ?? CompanionManifest.defaultSkin),
+              let sprite = image(at: now) else { return nil }
+        let background = backgroundImage(at: now).map { CGSize(width: $0.width, height: $0.height) }
+        return CompanionScene.headRect(head: head, imageSize: CGSize(width: sprite.width, height: sprite.height),
+                                       background: background, spriteRect: manifest.spriteRect, visible: camera(),
+                                       area: area, zoom: zoom)
+    }
+
+    /// After a pat session of three or more ended: tells Ame, if she is free, once per ten minutes,
+    /// never in the quiet hours or during a nap. The text is never logged or kept.
+    func tickPat(now: Date, ame: HerdrAgent?, store: HerdrStore) {
+        guard let report = patSession.takeEnded(now: now) else { return }
+        guard let ame, store.isConnected else { return }
+        let sentBefore = patLastSent ?? {
+            let saved = UserDefaults.standard.double(forKey: CompanionPatMessage.lastSentKey)
+            return saved > 0 ? Date(timeIntervalSince1970: saved) : nil
+        }()
+        guard CompanionPatMessage.allowed(count: report.count, lastSent: sentBefore, now: now, ameStatus: ame.agentStatus),
+              let params = CompanionMessage.promptParams(paneID: ame.paneID,
+                                                         text: CompanionPatMessage.text(count: report.count, key: report.key))
+        else { return }
+        patLastSent = now
+        UserDefaults.standard.set(now.timeIntervalSince1970, forKey: CompanionPatMessage.lastSentKey)
+        Task { try? await store.sendAgentPrompt(params) }
     }
 
     /// The commander's words for the current mood, from its newest reply.
@@ -1334,11 +1485,9 @@ final class CompanionModel: ObservableObject {
             let loveLabels = (self.manifest?.stickers ?? []).filter { $0.id == "love" }.map(\.label)
             self.ameLoveTime = CompanionAffection.newestLove(in: shown, extra: loveLabels)
             // Her newest reply decides how she feels: the tag, else the emotion words of the text.
+            self.countHearts(shown, loveLabels: loveLabels, now: Date())
             if let reply = shown.last(where: { $0.role == .assistant && $0.time != nil }), let time = reply.time {
-                let wording = CompanionEmotionRules.resolve(
-                    mood: .idle, signals: CompanionTextSignals(text: CompanionMessage.moodTag(in: reply.text).clean),
-                    textTime: time, statusElapsed: 0, now: time)
-                self.ameMood = reply.mood ?? wording?.rawValue
+                self.ameMood = Self.mood(of: reply)
                 self.ameMoodTime = time
             } else {
                 self.ameMood = nil
@@ -1346,6 +1495,30 @@ final class CompanionModel: ObservableObject {
             }
             self.updateUnread()
         }
+    }
+
+    /// The mood of one reply of Ame: the tag, else the emotion words of the text.
+    static func mood(of reply: CompanionMessage) -> String? {
+        guard let time = reply.time else { return reply.mood }
+        let wording = CompanionEmotionRules.resolve(
+            mood: .idle, signals: CompanionTextSignals(text: CompanionMessage.moodTag(in: reply.text).clean),
+            textTime: time, statusElapsed: 0, now: time)
+        return reply.mood ?? wording?.rawValue
+    }
+
+    /// Each new reply of Ame and each new loving message of the user changes the hearts once.
+    private func countHearts(_ shown: [CompanionMessage], loveLabels: [String], now: Date) {
+        guard let config = manifest?.hearts else { return }
+        if hearts == nil { hearts = CompanionHeartsState.load(now: now, config: config) }
+        guard var state = hearts else { return }
+        let before = state
+        let reachedFull = state.count(messages: shown, ameMood: { Self.mood(of: $0) }, loveExtra: loveLabels,
+                                      now: now, config: config)
+        guard state != before else { return }
+        hearts = state
+        publishHearts(state)
+        state.save()
+        if reachedFull { startNap(config: config) }
     }
 
     /// Whether the JINE box is expanded in the key window; reading clears the unread count.
@@ -1625,6 +1798,16 @@ struct CompanionView: View {
             VStack(spacing: 6) {
                 room(at: context.date)
                 .frame(height: CompanionPreferences.roomHeight(width: width, factor: heightFactor))
+                .overlay { headpatLayer(at: context.date) }
+                .overlay(alignment: .topLeading) {
+                    // Over the cutscene too; left-aligned, so it never covers the gear button.
+                    if model.showsHearts {
+                        CompanionHeartsBarView(filled: model.heartsFilled, level: model.heartsLevel,
+                                               icon: model.heartsIcon.flatMap { model.image(forPath: $0) })
+                            .frame(width: max(0, width * 0.45), alignment: .leading)
+                            .padding(3)
+                    }
+                }
                 .overlay(alignment: .bottom) {
                     // A thin grab strip along the bottom edge; dragging down makes the room taller.
                     ResizeHandleArea(
@@ -1649,7 +1832,8 @@ struct CompanionView: View {
                     }
                 }
                 if let text = model.player.bubbleText(dialogue: model.dialogue,
-                                                      title: commander?.terminalTitleStripped) {
+                                                      title: commander?.terminalTitleStripped,
+                                                      override: model.patBubble(now: context.date)) {
                     CompanionBubble(text: text)
                 }
             }
@@ -1659,7 +1843,10 @@ struct CompanionView: View {
                 model.refreshDialogue(sessionID: commander?.agentSessionID, registeredIDs: registeredSessionIDs,
                                      cwd: commander?.cwd, now: date)
                 model.refreshAme(sessionID: ame?.agentSessionID, now: date)
-                if let store { model.tickNudge(now: date, ame: ame, commanderStatus: commander?.agentStatus, store: store) }
+                if let store {
+                    model.tickNudge(now: date, ame: ame, commanderStatus: commander?.agentStatus, store: store)
+                    model.tickPat(now: date, ame: ame, store: store)
+                }
             }
             .onChange(of: mood) { _, mood in model.advance(now: Date(), mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus) }
             .onChange(of: activityID) { _, id in model.advance(now: Date(), mood: mood, activityID: id, skin: skin, status: commander?.agentStatus) }
@@ -1671,6 +1858,17 @@ struct CompanionView: View {
 }
 
 extension CompanionView {
+    /// Her head: a pointing hand over it, a click is a pat. Not while a cutscene plays.
+    @ViewBuilder
+    fileprivate func headpatLayer(at date: Date) -> some View {
+        if model.manifest?.headpat != nil {
+            CompanionHeadpatLayer(
+                head: { area in model.headRect(area: area, zoom: CompanionPreferences.clampedZoom(zoom), now: date) },
+                onHover: { model.setHovering($0) },
+                onPat: { model.pat() })
+        }
+    }
+
     /// The scene, or a skin-change cutscene frame in its place (no sprite, no zoom).
     @ViewBuilder
     fileprivate func room(at date: Date) -> some View {
@@ -1960,14 +2158,14 @@ enum CompanionNudge {
     static func isNudge(_ text: String) -> Bool { startsWith(text, prefix) }
     static func isStyle(_ text: String) -> Bool { startsWith(text, stylePrefix) }
 
-    /// Without the user messages that are nudges or `[style]` instructions, and without Ame's
+    /// Without the user messages that are nudges, `[pat]` or `[style]` instructions, and without Ame's
     /// short acknowledgement right after a `[style]` one.
     static func visible(_ messages: [CompanionMessage]) -> [CompanionMessage] {
         var result: [CompanionMessage] = []
         var hideAcknowledgement = false
         for message in messages {
             defer { hideAcknowledgement = message.role == .user && isStyle(message.text) }
-            if message.role == .user, isNudge(message.text) || isStyle(message.text) { continue }
+            if message.role == .user, isNudge(message.text) || isStyle(message.text) || CompanionPatMessage.isPat(message.text) { continue }
             if hideAcknowledgement, message.role == .assistant,
                message.text.trimmingCharacters(in: .whitespacesAndNewlines).count <= acknowledgementLength { continue }
             result.append(message)
@@ -2290,12 +2488,22 @@ struct CompanionSplitMix64: RandomNumberGenerator {
 }
 
 /// Decides when she does one of her ambient things. In a calm base mood (idle, done or waiting)
-/// she waits 25-60 s, picks one entry by weight, plays it for 20-45 s, rests for 30-90 s and may
-/// pick again. Any change of `context` (mood, skin, activity, a cutscene...) stops it at once.
+/// she waits, picks one entry that fits her hearts level by weight, plays it for 20-45 s, rests
+/// and may pick again. The more hearts, the shorter the waits: 90-180 s before a clip and 180-300 s
+/// of rest at level 0, 25-60 s and 30-90 s at level 100. Any change of `context` (mood, skin, activity, a cutscene...) stops it at once.
 struct CompanionAmbientScheduler {
-    static let dwell: ClosedRange<TimeInterval> = 25...60
+    static let dwellAtZero: ClosedRange<TimeInterval> = 90...180
+    static let dwellAtFull: ClosedRange<TimeInterval> = 25...60
     static let play: ClosedRange<TimeInterval> = 20...45
-    static let cooldown: ClosedRange<TimeInterval> = 30...90
+    static let cooldownAtZero: ClosedRange<TimeInterval> = 180...300
+    static let cooldownAtFull: ClosedRange<TimeInterval> = 30...90
+
+    /// The range for a hearts level (0...100): a straight line between the two ends.
+    static func scaled(_ zero: ClosedRange<TimeInterval>, _ full: ClosedRange<TimeInterval>,
+                       hearts: Double) -> ClosedRange<TimeInterval> {
+        let t = hearts.isFinite ? min(max(hearts, 0), 100) / 100 : 0
+        return (zero.lowerBound + (full.lowerBound - zero.lowerBound) * t)...(zero.upperBound + (full.upperBound - zero.upperBound) * t)
+    }
     static let baseMoods: Set<String> = ["idle", "done", "waiting"]
 
     enum Phase: Equatable {
@@ -2326,10 +2534,10 @@ struct CompanionAmbientScheduler {
     /// The entry to play now, if any: it suits the mood, the skin has its clip, it fits the hour
     /// and the commander's idle time, and it is not the one played last.
     mutating func pick(baseMood: String, entries: [CompanionAmbient], skinHas: (String) -> Bool,
-                       minutesIdle: Double, hour: Int) -> CompanionAmbient? {
+                       hearts: Double) -> CompanionAmbient? {
         let candidates = entries.filter {
             $0.moods.contains(baseMood) && skinHas($0.key) && $0.key != lastKey
-                && $0.fits(hour: hour, minutesIdle: minutesIdle)
+                && $0.fits(hearts: hearts)
         }
         let total = candidates.reduce(0) { $0 + $1.weight }
         guard !candidates.isEmpty, total > 0 else { return nil }
@@ -2344,7 +2552,7 @@ struct CompanionAmbientScheduler {
     /// Call often. `baseMood` is nil whenever she must not do anything (a cutscene, a game or
     /// stream activity, the setting off). Returns the key of the clip to play, or nil.
     mutating func update(now: Date, context: String, baseMood: String?, entries: [CompanionAmbient],
-                         skinHas: (String) -> Bool, minutesIdle: Double, hour: Int) -> String? {
+                         skinHas: (String) -> Bool, hearts: Double) -> String? {
         if context != self.context {
             self.context = context
             phase = .idle
@@ -2355,24 +2563,625 @@ struct CompanionAmbientScheduler {
         }
         func choose(_ scheduler: inout CompanionAmbientScheduler) {
             if let entry = scheduler.pick(baseMood: baseMood, entries: entries, skinHas: skinHas,
-                                          minutesIdle: minutesIdle, hour: hour) {
+                                          hearts: hearts) {
                 scheduler.lastKey = entry.key
                 scheduler.phase = .playing(key: entry.key, until: now.addingTimeInterval(scheduler.random(Self.play)))
             } else {
                 // Nothing fits right now: look again after another wait.
-                scheduler.phase = .dwelling(until: now.addingTimeInterval(scheduler.random(Self.dwell)))
+                scheduler.phase = .dwelling(until: now.addingTimeInterval(scheduler.random(Self.scaled(Self.dwellAtZero, Self.dwellAtFull, hearts: hearts))))
             }
         }
         switch phase {
         case .idle:
-            phase = .dwelling(until: now.addingTimeInterval(random(Self.dwell)))
+            phase = .dwelling(until: now.addingTimeInterval(random(Self.scaled(Self.dwellAtZero, Self.dwellAtFull, hearts: hearts))))
         case .dwelling(let until):
             if now >= until { choose(&self) }
         case .playing(_, let until):
-            if now >= until { phase = .cooling(until: now.addingTimeInterval(random(Self.cooldown))) }
+            if now >= until { phase = .cooling(until: now.addingTimeInterval(random(Self.scaled(Self.cooldownAtZero, Self.cooldownAtFull, hearts: hearts)))) }
         case .cooling(let until):
             if now >= until { choose(&self) }
         }
         return playingKey
+    }
+}
+
+// MARK: Headpats
+
+/// The optional `headpat` part of the manifest. Decoding never fails: a part that is missing or
+/// malformed is simply empty, and without any head the feature is off.
+struct CompanionHeadpat: Decodable, Equatable, Sendable {
+    struct Sounds: Decodable, Equatable, Sendable {
+        var pat: String?
+        var third: String?
+
+        init(pat: String? = nil, third: String? = nil) {
+            self.pat = pat
+            self.third = third
+        }
+
+        private enum Keys: String, CodingKey { case pat, third }
+
+        init(from decoder: Decoder) {
+            let container = try? decoder.container(keyedBy: Keys.self)
+            pat = CompanionHeadpat.lossy(container, .pat, String.self).flatMap { CompanionBackground.isSafe($0) ? $0 : nil }
+            third = CompanionHeadpat.lossy(container, .third, String.self).flatMap { CompanionBackground.isSafe($0) ? $0 : nil }
+        }
+    }
+
+    /// From this many pats on, the mood shows `key`.
+    struct Step: Equatable, Sendable {
+        var pats: Int
+        var key: String
+    }
+
+    struct Reaction: Decodable, Equatable, Sendable {
+        /// The sequence key played while the pointer is on her head; nil = no change.
+        var hover: String?
+        var steps: [Step]
+        var lines: [String]
+
+        init(hover: String? = nil, steps: [Step] = [], lines: [String] = []) {
+            self.hover = hover
+            self.steps = steps
+            self.lines = lines
+        }
+
+        private enum Keys: String, CodingKey { case hover, steps, lines }
+
+        /// One `[pats, key]` pair; anything else is dropped.
+        private struct RawStep: Decodable {
+            var pats: Int?
+            var key: String?
+
+            init(from decoder: Decoder) {
+                var container = try? decoder.unkeyedContainer()
+                pats = try? container?.decode(Int.self)
+                key = try? container?.decode(String.self)
+            }
+        }
+
+        init(from decoder: Decoder) {
+            let container = try? decoder.container(keyedBy: Keys.self)
+            hover = CompanionHeadpat.lossy(container, .hover, String.self)
+            let raw = CompanionHeadpat.lossy(container, .steps, [RawStep].self) ?? []
+            steps = raw.compactMap { step in
+                guard let pats = step.pats, pats >= 1, let key = step.key, !key.isEmpty else { return nil }
+                return Step(pats: pats, key: key)
+            }
+            lines = (CompanionHeadpat.lossy(container, .lines, [String].self) ?? []).filter { !$0.isEmpty }
+        }
+    }
+
+    var sounds = Sounds()
+    /// Each skin's head as x, y, width, height in the pixels of the sprite image.
+    var heads: [String: [Double]] = [:]
+    /// By the mood she is in when the pats start.
+    var reactions: [String: Reaction] = [:]
+
+    init(sounds: Sounds = Sounds(), heads: [String: [Double]] = [:], reactions: [String: Reaction] = [:]) {
+        self.sounds = sounds
+        self.heads = heads
+        self.reactions = reactions
+    }
+
+    private enum Keys: String, CodingKey { case sounds, heads, reactions }
+
+    init(from decoder: Decoder) {
+        let container = try? decoder.container(keyedBy: Keys.self)
+        sounds = Self.lossy(container, .sounds, Sounds.self) ?? Sounds()
+        let rawHeads = Self.lossy(container, .heads, [String: [Double]].self) ?? [:]
+        heads = rawHeads.filter { Self.isValidHead($0.value) }
+        reactions = Self.lossy(container, .reactions, [String: Reaction].self) ?? [:]
+    }
+
+    fileprivate static func lossy<T: Decodable, K: CodingKey>(_ container: KeyedDecodingContainer<K>?, _ key: K,
+                                                              _ type: T.Type) -> T? {
+        guard let container else { return nil }
+        return try? container.decode(T.self, forKey: key)
+    }
+
+    static func isValidHead(_ rect: [Double]) -> Bool {
+        rect.count == 4 && rect.allSatisfy(\.isFinite) && rect[2] > 0 && rect[3] > 0
+    }
+
+    /// Off without a single head.
+    var isUsable: Bool { !heads.isEmpty }
+
+    func head(forSkin skin: String) -> [Double]? { heads[skin] }
+
+    /// The reaction for the mood she was in; falls back to the commander's plain mood.
+    func reaction(for key: String) -> Reaction? { reactions[key] }
+
+    /// The step with the highest pats that is at most `count`; nil below the first step.
+    static func step(for count: Int, in steps: [Step]) -> Step? {
+        steps.filter { $0.pats <= count }.max { $0.pats < $1.pats }
+    }
+}
+
+/// One run of pats: they count while each comes within 20 s of the one before. Pure, so the
+/// rules are testable.
+struct CompanionHeadpatSession: Equatable {
+    struct Report: Equatable {
+        var count: Int
+        var key: String
+    }
+
+    /// A pause longer than this ends the session.
+    static let gap: TimeInterval = 20
+    /// How long the reached mood stays after the last pat.
+    static let hold: TimeInterval = 5 * 60
+    /// Where the base was "working", "done" lasts only this long.
+    static let workingDoneHold: TimeInterval = 4
+    /// How long the line of a new step stays in the speech bubble.
+    static let lineDuration: TimeInterval = 6
+
+    private(set) var count = 0
+    private(set) var base: String?
+    private(set) var lastPat: Date?
+    private(set) var reachedKey: String?
+    private(set) var reachedPats = 0
+    private(set) var line: String?
+    private var lineUntil: Date?
+    private var reported = true
+    private var pending: Report?
+
+    /// Whether `now` is still inside the session of the last pat.
+    func isOngoing(now: Date) -> Bool {
+        lastPat.map { now.timeIntervalSince($0) <= Self.gap } ?? false
+    }
+
+    /// Counts a pat. A pat after a pause starts a new session on `base`, the mood she is in now.
+    /// Returns the number of pats of the session.
+    @discardableResult
+    mutating func pat(now: Date, base currentBase: String, reactions: [String: CompanionHeadpat.Reaction],
+                      pick: (Int) -> Int = { Int.random(in: 0..<$0) }) -> Int {
+        if !isOngoing(now: now) {
+            if count >= CompanionPatMessage.minimumPats, !reported {
+                pending = Report(count: count, key: reachedKey ?? base ?? currentBase)
+            }
+            count = 0
+            base = currentBase
+            reachedKey = nil
+            reachedPats = 0
+            line = nil
+            lineUntil = nil
+            reported = false
+        }
+        count += 1
+        lastPat = now
+        let reaction = base.flatMap { reactions[$0] }
+        if let reaction, let step = CompanionHeadpat.step(for: count, in: reaction.steps) {
+            let isNew = step.pats != reachedPats
+            reachedKey = step.key
+            reachedPats = step.pats
+            if isNew, !reaction.lines.isEmpty {
+                line = reaction.lines[min(max(0, pick(reaction.lines.count)), reaction.lines.count - 1)]
+                lineUntil = now.addingTimeInterval(Self.lineDuration)
+            }
+        }
+        return count
+    }
+
+    /// How long the reached mood stays.
+    var holdDuration: TimeInterval {
+        base == "working" && reachedKey == "done" ? Self.workingDoneHold : Self.hold
+    }
+
+    /// The mood key that overrides the sequence now: the reached one for five minutes after the
+    /// last pat (four seconds for "done" on top of "working"), unless Ame's JINE reply is newer.
+    func overrideKey(now: Date, ameMoodTime: Date?) -> String? {
+        guard let reachedKey, let lastPat, now.timeIntervalSince(lastPat) < holdDuration else { return nil }
+        if let ameMoodTime, ameMoodTime > lastPat { return nil }
+        return reachedKey
+    }
+
+    /// True while the pats go on or their mood shows: an ambient clip must not run then.
+    func isEngaged(now: Date, ameMoodTime: Date?) -> Bool {
+        isOngoing(now: now) || overrideKey(now: now, ameMoodTime: ameMoodTime) != nil
+    }
+
+    /// The line for the speech bubble while it is due.
+    func bubbleLine(now: Date) -> String? {
+        guard let line, let lineUntil, now < lineUntil else { return nil }
+        return line
+    }
+
+    /// Once per session of at least three pats, after it ended: how many pats and the feeling.
+    mutating func takeEnded(now: Date) -> Report? {
+        if let report = pending {
+            pending = nil
+            return report
+        }
+        guard count >= CompanionPatMessage.minimumPats, !reported, !isOngoing(now: now) else { return nil }
+        reported = true
+        return Report(count: count, key: reachedKey ?? base ?? "idle")
+    }
+}
+
+/// The hidden turn that tells Ame about a headpat session.
+enum CompanionPatMessage {
+    static let prefix = "[pat]"
+    static let minimumPats = 3
+    static let minimumInterval: TimeInterval = 10 * 60
+    static let lastSentKey = "companionPatLastSent"
+
+    static func isPat(_ text: String) -> Bool {
+        text.drop(while: { $0.isWhitespace }).lowercased().hasPrefix(prefix)
+    }
+
+    /// "[pat] P-chan gave you 5 headpats; you feel: loving"
+    static func text(count: Int, key: String) -> String {
+        "\(prefix) P-chan gave you \(count) headpats; you feel: \(CompanionNudge.moodWord(key))"
+    }
+
+    /// Enough pats, Ame free to answer, ten minutes since the last one sent, and not in the quiet hours.
+    static func allowed(count: Int, lastSent: Date?, now: Date, ameStatus: String?,
+                        calendar: Calendar = .current) -> Bool {
+        guard count >= minimumPats, CompanionNudge.isAvailable(status: ameStatus),
+              !CompanionNudge.isQuiet(now, calendar: calendar) else { return false }
+        if let lastSent, now.timeIntervalSince(lastSent) < minimumInterval { return false }
+        return true
+    }
+}
+
+/// Pat sounds: which ones a pat plays, and playing them.
+enum CompanionHeadpatSound {
+    /// Every third pat of a session also plays the "third" sound.
+    static func playsThird(count: Int) -> Bool { count > 0 && count % 3 == 0 }
+
+    static func paths(count: Int, sounds: CompanionHeadpat.Sounds) -> [String] {
+        var result: [String] = []
+        if let pat = sounds.pat { result.append(pat) }
+        if playsThird(count: count), let third = sounds.third { result.append(third) }
+        return result
+    }
+
+    @MainActor private static var playing: [NSSound] = []
+
+    @MainActor
+    static func play(_ paths: [String], in directory: URL) {
+        playing.removeAll { !$0.isPlaying }
+        for path in paths {
+            guard CompanionBackground.isSafe(path),
+                  let sound = NSSound(contentsOf: directory.appendingPathComponent(path), byReference: false)
+            else { continue }
+            playing.append(sound)
+            sound.play()
+        }
+    }
+}
+
+/// Where her head is in the room, and whether the pointer is on it.
+enum CompanionHeadpatHit {
+    /// The settings button in the top-right corner (16 pt plus padding) and the resize strip along
+    /// the bottom edge keep their clicks.
+    static let gearSize: CGFloat = 22
+    static let stripHeight: CGFloat = 7
+
+    static func contains(_ point: CGPoint, head: CGRect?, area: CGSize) -> Bool {
+        guard let head, head.contains(point) else { return false }
+        let gear = CGRect(x: area.width - gearSize, y: 0, width: gearSize, height: gearSize)
+        let strip = CGRect(x: 0, y: area.height - stripHeight, width: area.width, height: stripHeight)
+        return !gear.contains(point) && !strip.contains(point)
+    }
+}
+
+extension CompanionScene {
+    /// The head rectangle (x, y, width, height in the pixels of the sprite image) in the room's
+    /// coordinates, through the same fit, magnification and placement as `body`.
+    static func headRect(head: [Double], imageSize: CGSize, background: CGSize?, spriteRect: [Double]?,
+                         visible: CGRect?, area: CGSize, zoom: Double) -> CGRect? {
+        guard CompanionHeadpat.isValidHead(head), imageSize.width > 0, imageSize.height > 0,
+              area.width > 0, area.height > 0, zoom.isFinite, zoom > 0 else { return nil }
+        let origin: CGPoint
+        let fit: CGFloat
+        let anchor: CGPoint
+        let offset: CGPoint
+        if let background, let rect = spriteRect, rect.count == 4, background.width > 0, background.height > 0,
+           rect[2] > 0, rect[3] > 0 {
+            let scale = fillScale(content: background, in: area)
+            let unit = zoomAnchor(spriteRect: rect, backgroundSize: background, imageSize: imageSize, visible: visible)
+            anchor = CGPoint(x: unit.x * background.width * scale, y: unit.y * background.height * scale)
+            let backgroundFit = min(rect[2] / imageSize.width, rect[3] / imageSize.height)
+            let shown = CGSize(width: imageSize.width * backgroundFit, height: imageSize.height * backgroundFit)
+            origin = CGPoint(x: (rect[0] + (rect[2] - shown.width) / 2) * scale,
+                             y: (rect[1] + (rect[3] - shown.height) / 2) * scale)
+            fit = backgroundFit * scale
+            offset = CGPoint(x: (area.width - background.width * scale) / 2,
+                             y: area.height - background.height * scale)
+        } else {
+            let unit = zoomAnchor(visible: visible, imageSize: imageSize, area: area)
+            anchor = CGPoint(x: unit.x * area.width, y: unit.y * area.height)
+            fit = min(area.width / imageSize.width, area.height / imageSize.height)
+            origin = CGPoint(x: (area.width - imageSize.width * fit) / 2, y: (area.height - imageSize.height * fit) / 2)
+            offset = .zero
+        }
+        let z = CGFloat(zoom)
+        let x = origin.x + head[0] * fit
+        let y = origin.y + head[1] * fit
+        return CGRect(x: offset.x + anchor.x + z * (x - anchor.x), y: offset.y + anchor.y + z * (y - anchor.y),
+                      width: head[2] * fit * z, height: head[3] * fit * z)
+    }
+}
+
+// MARK: Hearts
+
+/// The optional `hearts` part of the manifest. Decoding never fails; without it the feature is off.
+struct CompanionHearts: Decodable, Equatable, Sendable {
+    struct Nap: Equatable, Sendable {
+        var key = "sleep"
+        var fallback: String?
+    }
+
+    struct Gains: Equatable, Sendable {
+        var pat = 4.0
+        var jineLove = 8.0
+        var jineHappy = 4.0
+        var userLove = 6.0
+    }
+
+    struct Losses: Equatable, Sendable {
+        var jineSad = 5.0
+        var jineAngry = 8.0
+    }
+
+    var icon: String?
+    var nap = Nap()
+    var gains = Gains()
+    var losses = Losses()
+    var decayPerHour = 10.0
+    private var valid = true
+
+    init() {}
+
+    private enum Keys: String, CodingKey { case icon, nap, gains, losses, decayPerHour }
+    private enum NapKeys: String, CodingKey { case key, fallback }
+    private enum GainKeys: String, CodingKey { case pat, jineLove, jineHappy, userLove }
+    private enum LossKeys: String, CodingKey { case jineSad, jineAngry }
+
+    private static func number<K: CodingKey>(_ container: KeyedDecodingContainer<K>?, _ key: K, _ fallback: Double,
+                                             _ range: ClosedRange<Double>) -> Double {
+        guard let value = CompanionHeadpat.lossy(container, key, Double.self), value.isFinite else { return fallback }
+        return min(max(value, range.lowerBound), range.upperBound)
+    }
+
+    init(from decoder: Decoder) {
+        guard let container = try? decoder.container(keyedBy: Keys.self) else {
+            valid = false
+            return
+        }
+        icon = CompanionHeadpat.lossy(container, .icon, String.self).flatMap { CompanionBackground.isSafe($0) ? $0 : nil }
+        if let nap = try? container.nestedContainer(keyedBy: NapKeys.self, forKey: .nap) {
+            if let key = CompanionHeadpat.lossy(nap, .key, String.self), !key.isEmpty { self.nap.key = key }
+            self.nap.fallback = CompanionHeadpat.lossy(nap, .fallback, String.self)
+        }
+        if let gains = try? container.nestedContainer(keyedBy: GainKeys.self, forKey: .gains) {
+            self.gains.pat = Self.number(gains, .pat, 4, 0...100)
+            self.gains.jineLove = Self.number(gains, .jineLove, 8, 0...100)
+            self.gains.jineHappy = Self.number(gains, .jineHappy, 4, 0...100)
+            self.gains.userLove = Self.number(gains, .userLove, 6, 0...100)
+        }
+        if let losses = try? container.nestedContainer(keyedBy: LossKeys.self, forKey: .losses) {
+            self.losses.jineSad = Self.number(losses, .jineSad, 5, 0...100)
+            self.losses.jineAngry = Self.number(losses, .jineAngry, 8, 0...100)
+        }
+        decayPerHour = Self.number(container, .decayPerHour, 10, 0...100)
+    }
+
+    var isUsable: Bool { valid }
+
+    /// The level change of one reply of Ame, by its mood.
+    func delta(forAmeMood mood: String?) -> Double {
+        switch mood?.lowercased() {
+        case "love": return gains.jineLove
+        case "done": return gains.jineHappy
+        case "sad", "crying": return -losses.jineSad
+        case "angry": return -losses.jineAngry
+        default: return 0
+        }
+    }
+}
+
+/// Her hearts level (0...100), kept in UserDefaults with the time it was last updated, so the
+/// decay runs by wall time across relaunches. Pure apart from `load` and `save`.
+struct CompanionHeartsState: Equatable {
+    static let levelKey = "companionHearts"
+    static let updatedKey = "companionHeartsUpdated"
+    static let ameCountedKey = "companionHeartsAme"
+    static let userCountedKey = "companionHeartsUser"
+    static let startLevel = 40.0
+
+    private(set) var level = CompanionHeartsState.startLevel
+    private(set) var updated: Date
+    /// The newest Ame reply and the newest user message already counted.
+    private(set) var ameCounted: Date?
+    private(set) var userCounted: Date?
+
+    init(now: Date) { updated = now }
+
+    /// Takes away `decayPerHour` for each hour since the last update.
+    mutating func decay(now: Date, config: CompanionHearts) {
+        let elapsed = now.timeIntervalSince(updated)
+        guard elapsed > 0 else { return }
+        updated = now
+        level = max(0, level - config.decayPerHour * elapsed / 3600)
+    }
+
+    /// Changes the level, kept in 0...100. True only on the upward edge: the level was below 100
+    /// and is now 100. Staying at 100 never fires again; it re-arms once the level is below 100.
+    @discardableResult
+    mutating func add(_ delta: Double, now: Date, config: CompanionHearts) -> Bool {
+        decay(now: now, config: config)
+        guard delta.isFinite else { return false }
+        let before = level
+        level = min(100, max(0, level + delta))
+        return before < 100 && level >= 100
+    }
+
+    /// Counts the replies of Ame and the messages of the user that are newer than the ones counted
+    /// before, each once. The very first sight of a conversation only notes its newest message, so
+    /// the old history does not count. Returns true when the change took the level up to 100.
+    @discardableResult
+    mutating func count(messages: [CompanionMessage], ameMood: (CompanionMessage) -> String?,
+                        loveExtra: [String], now: Date, config: CompanionHearts) -> Bool {
+        var total = 0.0
+        let replies = messages.filter { $0.role == .assistant && $0.time != nil }.sorted { $0.time! < $1.time! }
+        let mine = messages.filter { $0.role == .user && $0.time != nil }.sorted { $0.time! < $1.time! }
+        if let counted = ameCounted {
+            for reply in replies where reply.time! > counted { total += config.delta(forAmeMood: ameMood(reply)) }
+        }
+        if let newest = replies.last?.time, newest > (ameCounted ?? .distantPast) { ameCounted = newest }
+        if let counted = userCounted {
+            for message in mine where message.time! > counted && CompanionAffection.matches(message.text, extra: loveExtra) {
+                total += config.gains.userLove
+            }
+        }
+        if let newest = mine.last?.time, newest > (userCounted ?? .distantPast) { userCounted = newest }
+        decay(now: now, config: config)
+        return total != 0 && add(total, now: now, config: config)
+    }
+
+    static func load(defaults: UserDefaults = .standard, now: Date, config: CompanionHearts) -> CompanionHeartsState {
+        var state = CompanionHeartsState(now: now)
+        if defaults.object(forKey: levelKey) != nil {
+            let level = defaults.double(forKey: levelKey)
+            state.level = level.isFinite ? min(100, max(0, level)) : startLevel
+        }
+        let updated = defaults.double(forKey: updatedKey)
+        state.updated = updated > 0 ? Date(timeIntervalSince1970: updated) : now
+        func date(_ key: String) -> Date? {
+            let value = defaults.double(forKey: key)
+            return value > 0 ? Date(timeIntervalSince1970: value) : nil
+        }
+        state.ameCounted = date(ameCountedKey)
+        state.userCounted = date(userCountedKey)
+        // A launch at 100 does not fire the nap; only a rise to 100 does.
+        state.decay(now: now, config: config)
+        return state
+    }
+
+    func save(defaults: UserDefaults = .standard) {
+        defaults.set(level, forKey: Self.levelKey)
+        defaults.set(updated.timeIntervalSince1970, forKey: Self.updatedKey)
+        func store(_ date: Date?, _ key: String) {
+            if let date { defaults.set(date.timeIntervalSince1970, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        store(ameCounted, Self.ameCountedKey)
+        store(userCounted, Self.userCountedKey)
+    }
+}
+
+/// The nap: when the level reaches 100 she plays one clip once, then goes back to her mood.
+enum CompanionNap {
+    static let bubble = "zzz... ♡"
+
+    /// `nap.key` if the skin has its own, else the fallback; nil when neither exists.
+    static func key(config: CompanionHearts.Nap, skinHas: (String) -> Bool) -> String? {
+        if skinHas(config.key) { return config.key }
+        if let fallback = config.fallback, skinHas(fallback) { return fallback }
+        return nil
+    }
+
+    /// The clip played once: no loop, and no blink or gesture holds.
+    static func oneShot(_ sequence: CompanionSequence) -> CompanionSequence {
+        CompanionSequence(dir: sequence.dir, frames: sequence.frames, fps: sequence.fps, loop: false, style: nil)
+    }
+
+    /// A pass in play: it started at `startedAt` (set when its first frame shows) and lasts one run.
+    struct Pass: Equatable {
+        var key: String
+        var sequence: CompanionSequence
+        var startedAt: Date?
+
+        func isActive(now: Date) -> Bool {
+            guard let startedAt else { return true }
+            return now < startedAt.addingTimeInterval(sequence.duration)
+        }
+    }
+
+    /// The pass to start for an upward edge: one variant of the key, picked by `pick`.
+    static func pass(key: String, sequences: [CompanionSequence], pick: (Int) -> Int = { Int.random(in: 0..<$0) }) -> Pass? {
+        guard !sequences.isEmpty else { return nil }
+        return Pass(key: key, sequence: oneShot(sequences[min(max(0, pick(sequences.count)), sequences.count - 1)]),
+                    startedAt: nil)
+    }
+}
+
+/// The bar's fill as a whole number of steps: a hard step, never a slide.
+enum CompanionHeartsBar {
+    static let steps = 20
+
+    static func filled(level: Double) -> Int {
+        guard level.isFinite else { return 0 }
+        return Int((min(max(level, 0), 100) / 100 * Double(steps)).rounded(.down))
+    }
+}
+
+/// The invisible layer over the room that finds her head: hover shows the pointing hand and the
+/// reaction's hover animation, a click is one pat. The gear button and the resize strip keep
+/// their own clicks.
+struct CompanionHeadpatLayer: View {
+    let head: (CGSize) -> CGRect?
+    let onHover: (Bool) -> Void
+    let onPat: () -> Void
+    @State private var over = false
+
+    var body: some View {
+        GeometryReader { area in
+            Color.clear
+                .contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let point):
+                        set(CompanionHeadpatHit.contains(point, head: head(area.size), area: area.size))
+                    case .ended:
+                        set(false)
+                    }
+                }
+                .gesture(SpatialTapGesture().onEnded { tap in
+                    if CompanionHeadpatHit.contains(tap.location, head: head(area.size), area: area.size) { onPat() }
+                })
+        }
+        .onDisappear { set(false) }
+    }
+
+    private func set(_ value: Bool) {
+        guard value != over else { return }
+        over = value
+        if value { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        onHover(value)
+    }
+}
+
+/// Her hearts: a small pink bar with the heart on the left. The fill moves in whole steps.
+struct CompanionHeartsBarView: View {
+    let filled: Int
+    let level: Double
+    let icon: CGImage?
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Group {
+                if let icon {
+                    Image(decorative: icon, scale: 1).interpolation(.none).resizable().aspectRatio(contentMode: .fit)
+                } else {
+                    Image(systemName: "heart.fill").font(.system(size: 8)).foregroundStyle(CompanionPalette.pink)
+                }
+            }
+            .frame(width: 10, height: 10)
+            GeometryReader { track in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(CompanionPalette.panel)
+                    Rectangle().fill(CompanionPalette.pink)
+                        .frame(width: track.size.width * CGFloat(filled) / CGFloat(CompanionHeartsBar.steps))
+                }
+                .overlay(Rectangle().strokeBorder(CompanionPalette.indigo, lineWidth: 1))
+            }
+            .frame(height: 8)
+        }
+        .transaction { $0.animation = nil }
+        .help("Ame's hearts")
+        .accessibilityLabel("Ame's hearts")
+        .accessibilityValue("\(Int(level)) percent")
     }
 }
