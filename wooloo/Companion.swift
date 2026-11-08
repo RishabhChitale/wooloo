@@ -1515,9 +1515,9 @@ extension CompanionView {
                            spriteRect: model.manifest?.spriteRect,
                            sprite: model.image(at: date),
                            spriteVisible: model.player.sequence.flatMap { model.sequenceBounds[$0.dir] },
-                           zoom: CompanionPreferences.clampedZoom(zoom),
                            outgoing: model.fadingOutImage(at: date)?.image,
-                           outgoingOpacity: model.fadingOutImage(at: date)?.opacity ?? 0)
+                           outgoingOpacity: model.fadingOutImage(at: date)?.opacity ?? 0,
+                           zoom: CompanionPreferences.clampedZoom(zoom))
         }
     }
 }
