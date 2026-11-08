@@ -44,7 +44,6 @@
 		A10000000000000000000024 /* HerdrShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000025 /* HerdrShortcuts.swift */; };
 		A1C00000000000000000A101 /* Companion.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000A102 /* Companion.swift */; };
 		A1C00000000000000000A103 /* CompanionBoxes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000A104 /* CompanionBoxes.swift */; };
-		A1C00000000000000000A201 /* ActiveTasks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C00000000000000000A202 /* ActiveTasks.swift */; };
 		A10000000000000000000026 /* WorkspaceFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* WorkspaceFiles.swift */; };
 		AFE100000000000000000004 /* WorkspaceFiles+Listing.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFE100000000000000000005 /* WorkspaceFiles+Listing.swift */; };
 		AFE100000000000000000002 /* WorkspaceFiles+Git.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFE100000000000000000003 /* WorkspaceFiles+Git.swift */; };
@@ -125,7 +124,6 @@
 		C30000000000000000000012 /* HerdrConfigDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000013 /* HerdrConfigDocumentTests.swift */; };
 		C30000000000000000000014 /* HerdrShortcutsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000015 /* HerdrShortcutsTests.swift */; };
 		C3C00000000000000000A101 /* CompanionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3C00000000000000000A102 /* CompanionTests.swift */; };
-		C3C00000000000000000A201 /* ActiveTasksTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3C00000000000000000A202 /* ActiveTasksTests.swift */; };
 		C30000000000000000000016 /* ParsedDiffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000017 /* ParsedDiffTests.swift */; };
 		C30000000000000000000018 /* WorkspaceSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000019 /* WorkspaceSearchTests.swift */; };
 		C3000000000000000000001A /* HerdrSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3000000000000000000001B /* HerdrSnapshotTests.swift */; };
@@ -219,7 +217,6 @@
 		A10000000000000000000025 /* HerdrShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrShortcuts.swift; sourceTree = "<group>"; };
 		A1C00000000000000000A102 /* Companion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Companion.swift; sourceTree = "<group>"; };
 		A1C00000000000000000A104 /* CompanionBoxes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionBoxes.swift; sourceTree = "<group>"; };
-		A1C00000000000000000A202 /* ActiveTasks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveTasks.swift; sourceTree = "<group>"; };
 		A10000000000000000000027 /* WorkspaceFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFiles.swift; sourceTree = "<group>"; };
 		AFE100000000000000000005 /* WorkspaceFiles+Listing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WorkspaceFiles+Listing.swift"; sourceTree = "<group>"; };
 		AFE100000000000000000003 /* WorkspaceFiles+Git.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WorkspaceFiles+Git.swift"; sourceTree = "<group>"; };
@@ -298,7 +295,6 @@
 		C30000000000000000000013 /* HerdrConfigDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrConfigDocumentTests.swift; sourceTree = "<group>"; };
 		C30000000000000000000015 /* HerdrShortcutsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrShortcutsTests.swift; sourceTree = "<group>"; };
 		C3C00000000000000000A102 /* CompanionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionTests.swift; sourceTree = "<group>"; };
-		C3C00000000000000000A202 /* ActiveTasksTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveTasksTests.swift; sourceTree = "<group>"; };
 		C30000000000000000000017 /* ParsedDiffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParsedDiffTests.swift; sourceTree = "<group>"; };
 		C30000000000000000000019 /* WorkspaceSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSearchTests.swift; sourceTree = "<group>"; };
 		C3000000000000000000001B /* HerdrSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrSnapshotTests.swift; sourceTree = "<group>"; };
@@ -384,7 +380,6 @@
 				A10000000000000000000025 /* HerdrShortcuts.swift */,
 				A1C00000000000000000A102 /* Companion.swift */,
 				A1C00000000000000000A104 /* CompanionBoxes.swift */,
-				A1C00000000000000000A202 /* ActiveTasks.swift */,
 				A10000000000000000000027 /* WorkspaceFiles.swift */,
 				AFE100000000000000000005 /* WorkspaceFiles+Listing.swift */,
 				AFE100000000000000000003 /* WorkspaceFiles+Git.swift */,
@@ -476,7 +471,6 @@
 				C30000000000000000000013 /* HerdrConfigDocumentTests.swift */,
 				C30000000000000000000015 /* HerdrShortcutsTests.swift */,
 				C3C00000000000000000A102 /* CompanionTests.swift */,
-				C3C00000000000000000A202 /* ActiveTasksTests.swift */,
 				C30000000000000000000017 /* ParsedDiffTests.swift */,
 				C30000000000000000000019 /* WorkspaceSearchTests.swift */,
 				C3000000000000000000001B /* HerdrSnapshotTests.swift */,
@@ -691,7 +685,6 @@
 				A10000000000000000000024 /* HerdrShortcuts.swift in Sources */,
 				A1C00000000000000000A101 /* Companion.swift in Sources */,
 				A1C00000000000000000A103 /* CompanionBoxes.swift in Sources */,
-				A1C00000000000000000A201 /* ActiveTasks.swift in Sources */,
 				A10000000000000000000026 /* WorkspaceFiles.swift in Sources */,
 				AFE100000000000000000004 /* WorkspaceFiles+Listing.swift in Sources */,
 				AFE100000000000000000002 /* WorkspaceFiles+Git.swift in Sources */,
@@ -771,7 +764,6 @@
 				C30000000000000000000012 /* HerdrConfigDocumentTests.swift in Sources */,
 				C30000000000000000000014 /* HerdrShortcutsTests.swift in Sources */,
 				C3C00000000000000000A101 /* CompanionTests.swift in Sources */,
-				C3C00000000000000000A201 /* ActiveTasksTests.swift in Sources */,
 				C30000000000000000000016 /* ParsedDiffTests.swift in Sources */,
 				C30000000000000000000018 /* WorkspaceSearchTests.swift in Sources */,
 				C3000000000000000000001A /* HerdrSnapshotTests.swift in Sources */,

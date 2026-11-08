@@ -859,7 +859,7 @@ final class CompanionModel: ObservableObject {
         let idle = CompanionMood(agentStatus: ame.agentStatus) == .idle
         guard nudges.due(now: now, ameIsIdle: idle) else { return }
         let hint = CompanionNudge.hint(commanderWorking: CompanionMood(agentStatus: commanderStatus) == .working,
-                                       runningTasks: ActiveTasks.loadTasks().count)
+                                       runningTasks: 0)
         guard let params = CompanionMessage.promptParams(paneID: ame.paneID, text: CompanionNudge.text(now: now, hint: hint))
         else { return }
         Task { try? await store.sendAgentPrompt(params) }
@@ -953,7 +953,7 @@ struct CompanionView: View {
     /// The "ame" agent whose side chat the JINE box shows; the room itself keeps the commander.
     var ame: HerdrAgent?
     var store: HerdrStore?
-    /// The sidebar's width; the room is 0.75 times as tall.
+    /// The sidebar's width; the room is 1.0 times as tall by default.
     let width: CGFloat
     @AppStorage(CompanionPreferences.activityKey) private var activityID = CompanionPreferences.defaultActivity
     @AppStorage(CompanionPreferences.skinKey) private var skin = CompanionManifest.defaultSkin

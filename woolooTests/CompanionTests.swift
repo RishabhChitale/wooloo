@@ -691,19 +691,19 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(CompanionPreferences.clampedHeightFactor(0.1), 0.5)
         XCTAssertEqual(CompanionPreferences.clampedHeightFactor(9), 1.8)
         XCTAssertEqual(CompanionPreferences.clampedHeightFactor(1.1), 1.1)
-        XCTAssertEqual(CompanionPreferences.clampedHeightFactor(.nan), 0.75)
+        XCTAssertEqual(CompanionPreferences.clampedHeightFactor(.nan), 1.0)
         XCTAssertEqual(CompanionPreferences.clampedZoom(0.2), 1.0)
         XCTAssertEqual(CompanionPreferences.clampedZoom(7), 2.5)
         XCTAssertEqual(CompanionPreferences.clampedZoom(1.3), 1.3)
-        XCTAssertEqual(CompanionPreferences.clampedZoom(.infinity), 1.6)
+        XCTAssertEqual(CompanionPreferences.clampedZoom(.infinity), 2.0)
     }
 
     func testHeightFactorAndZoomPersistAndDefault() throws {
         let suite = "CompanionSizeTests-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        XCTAssertEqual(CompanionPreferences.heightFactor(defaults: defaults), 0.75, "unset uses the default")
-        XCTAssertEqual(CompanionPreferences.zoom(defaults: defaults), 1.6)
+        XCTAssertEqual(CompanionPreferences.heightFactor(defaults: defaults), 1.0, "unset uses the default")
+        XCTAssertEqual(CompanionPreferences.zoom(defaults: defaults), 2.0)
         defaults.set(1.25, forKey: CompanionPreferences.heightFactorKey)
         defaults.set(2.0, forKey: CompanionPreferences.zoomKey)
         XCTAssertEqual(CompanionPreferences.heightFactor(defaults: defaults), 1.25)

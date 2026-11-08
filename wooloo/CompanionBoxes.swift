@@ -13,11 +13,11 @@ enum CompanionPreferences {
     static let skinKey = "companionSkin"
     /// The room's height as a multiple of the sidebar's width.
     static let heightFactorKey = "companionHeightFactor"
-    static let defaultHeightFactor = 0.75
+    static let defaultHeightFactor = 1.0
     static let heightFactorRange: ClosedRange<Double> = 0.5...1.8
     /// How far the scene is magnified around her sprite.
     static let zoomKey = "companionZoom"
-    static let defaultZoom = 1.6
+    static let defaultZoom = 2.0
     static let zoomRange: ClosedRange<Double> = 1.0...2.5
 
     /// `value` inside `range`; anything that is not a number gives `fallback`.
