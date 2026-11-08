@@ -1926,6 +1926,15 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(CompanionNap.bubble, "zzz... ♡")
     }
 
+    func testHeartsTipPosition() {
+        XCTAssertEqual(CompanionHeartsBar.tipX(trackWidth: 100, filled: 0, iconWidth: 16), 8)
+        XCTAssertEqual(CompanionHeartsBar.tipX(trackWidth: 100, filled: 10, iconWidth: 16), 50)
+        XCTAssertEqual(CompanionHeartsBar.tipX(trackWidth: 100, filled: 20, iconWidth: 16), 92)
+        XCTAssertEqual(CompanionHeartsBar.tipX(trackWidth: 100, filled: 99, iconWidth: 16), 92)
+        XCTAssertEqual(CompanionHeartsBar.tipX(trackWidth: 10, filled: 20, iconWidth: 16), 5)
+        XCTAssertEqual(CompanionHeartsBar.tipX(trackWidth: 0, filled: 5, iconWidth: 16), 0)
+    }
+
     // MARK: Instant switching and a steady camera
 
     func testSkinCameraIgnoresFullCanvasFramesAndNeedsNoSequence() {

@@ -3115,6 +3115,15 @@ enum CompanionHeartsBar {
         guard level.isFinite else { return 0 }
         return Int((min(max(level, 0), 100) / 100 * Double(steps)).rounded(.down))
     }
+
+    /// The x of the heart's centre: the tip of the fill, kept so the whole icon stays inside the track.
+    static func tipX(trackWidth: CGFloat, filled: Int, iconWidth: CGFloat) -> CGFloat {
+        guard trackWidth.isFinite, trackWidth > 0 else { return 0 }
+        let tip = trackWidth * CGFloat(min(max(filled, 0), steps)) / CGFloat(steps)
+        let half = iconWidth / 2
+        if trackWidth <= iconWidth { return trackWidth / 2 }
+        return min(max(tip, half), trackWidth - half)
+    }
 }
 
 /// The invisible layer over the room that finds her head: hover shows the pointing hand and the
@@ -3158,27 +3167,32 @@ struct CompanionHeartsBarView: View {
     let filled: Int
     let level: Double
     let icon: CGImage?
+    static let iconHeight: CGFloat = 16
 
     var body: some View {
-        HStack(spacing: 3) {
-            Group {
-                if let icon {
-                    Image(decorative: icon, scale: 1).interpolation(.none).resizable().aspectRatio(contentMode: .fit)
-                } else {
-                    Image(systemName: "heart.fill").font(.system(size: 8)).foregroundStyle(CompanionPalette.pink)
+        let height = Self.iconHeight
+        let width = icon.map { height * CGFloat($0.width) / CGFloat(max($0.height, 1)) } ?? height
+        GeometryReader { track in
+            let x = CompanionHeartsBar.tipX(trackWidth: track.size.width, filled: filled, iconWidth: width)
+            ZStack(alignment: .leading) {
+                Rectangle().fill(CompanionPalette.panel).frame(height: 8)
+                Rectangle().fill(CompanionPalette.pink)
+                    .frame(width: track.size.width * CGFloat(filled) / CGFloat(CompanionHeartsBar.steps), height: 8)
+                Rectangle().strokeBorder(CompanionPalette.indigo, lineWidth: 1).frame(height: 8)
+                Group {
+                    if let icon {
+                        Image(decorative: icon, scale: 1).interpolation(.none).resizable()
+                    } else {
+                        Image(systemName: "heart.fill").resizable().foregroundStyle(CompanionPalette.pink)
+                    }
                 }
+                .aspectRatio(contentMode: .fit)
+                .frame(width: width, height: height)
+                .offset(x: x - width / 2)
             }
-            .frame(width: 10, height: 10)
-            GeometryReader { track in
-                ZStack(alignment: .leading) {
-                    Rectangle().fill(CompanionPalette.panel)
-                    Rectangle().fill(CompanionPalette.pink)
-                        .frame(width: track.size.width * CGFloat(filled) / CGFloat(CompanionHeartsBar.steps))
-                }
-                .overlay(Rectangle().strokeBorder(CompanionPalette.indigo, lineWidth: 1))
-            }
-            .frame(height: 8)
+            .frame(height: height, alignment: .leading)
         }
+        .frame(height: height)
         .transaction { $0.animation = nil }
         .help("Ame's hearts")
         .accessibilityLabel("Ame's hearts")
