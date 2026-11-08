@@ -1027,7 +1027,7 @@ struct CompanionView: View {
     }
 }
 
-/// Her sprite, alone or in front of a background that is fitted into the area; the sprite is
+/// Her sprite, alone or in front of a background that fills the area (bottom-centered); the sprite is
 /// fitted into `spriteRect`, given in background pixels, at the background's scale.
 struct CompanionScene: View {
     let background: CGImage?
@@ -1081,11 +1081,18 @@ struct CompanionScene: View {
         return min(area.width / content.width, area.height / content.height)
     }
 
+    /// The scale that makes `content` cover `area` completely: the larger of the two fits, so
+    /// the background is cropped on one axis and never leaves a band.
+    static func fillScale(content: CGSize, in area: CGSize) -> CGFloat {
+        guard content.width > 0, content.height > 0 else { return 1 }
+        return max(area.width / content.width, area.height / content.height)
+    }
+
     var body: some View {
         GeometryReader { area in
             if let background, let rect = spriteRect, rect.count == 4 {
                 let size = CGSize(width: background.width, height: background.height)
-                let scale = Self.fitScale(content: size, in: area.size)
+                let scale = Self.fillScale(content: size, in: area.size)
                 ZStack(alignment: .topLeading) {
                     Image(decorative: background, scale: 1)
                         .interpolation(.none)
@@ -1105,7 +1112,9 @@ struct CompanionScene: View {
                     spriteRect: rect, backgroundSize: size,
                     imageSize: sprite.map { CGSize(width: $0.width, height: $0.height) } ?? .zero,
                     visible: spriteVisible))
-                .frame(width: area.size.width, height: area.size.height)
+                // Bottom-center: the extra width is cropped evenly left and right, the extra
+                // height at the top, so the picture always reaches every edge of the room.
+                .frame(width: area.size.width, height: area.size.height, alignment: .bottom)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             } else if let sprite {
                 Image(decorative: sprite, scale: 1)

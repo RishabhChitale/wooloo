@@ -929,4 +929,20 @@ final class CompanionTests: XCTestCase {
         XCTAssertFalse(HerdrNotifier.suppresses(agentName: "commander", notifiesAme: false))
         XCTAssertFalse(HerdrNotifier.suppresses(agentName: nil, notifiesAme: false))
     }
+
+    func testBackgroundFillsTheRoomAtEverySize() {
+        let background = CGSize(width: 320, height: 180)
+        for factor in [0.5, 1.0, 1.54, 1.8] {
+            for width in [200.0, 244.0, 400.0] {
+                let area = CGSize(width: width, height: CompanionPreferences.roomHeight(width: width, factor: factor))
+                let scale = CompanionScene.fillScale(content: background, in: area)
+                XCTAssertGreaterThanOrEqual(background.width * scale, area.width - 0.0001, "w \(width) f \(factor)")
+                XCTAssertGreaterThanOrEqual(background.height * scale, area.height - 0.0001, "w \(width) f \(factor)")
+                // One axis fits exactly: nothing is scaled more than needed.
+                XCTAssertTrue(abs(background.width * scale - area.width) < 0.0001
+                              || abs(background.height * scale - area.height) < 0.0001)
+            }
+        }
+        XCTAssertEqual(CompanionScene.fillScale(content: .zero, in: CGSize(width: 10, height: 10)), 1)
+    }
 }
