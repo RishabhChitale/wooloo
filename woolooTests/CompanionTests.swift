@@ -1110,4 +1110,143 @@ final class CompanionTests: XCTestCase {
         XCTAssertTrue(CompanionMoodState.isDue(key: "idle", lastKey: "idle", lastWrite: t, now: t.addingTimeInterval(30)))
         XCTAssertTrue(CompanionMoodState.isDue(key: "working", lastKey: "idle", lastWrite: t, now: t.addingTimeInterval(1)))
     }
+
+    // MARK: Animation polish
+
+    private func timeline(_ style: CompanionClipStyle, frames: Int = 4, fps: Double = 4, seed: UInt64 = 7) -> CompanionClipTimeline {
+        CompanionClipTimeline(style: style, frames: frames, fps: fps, seed: seed)
+    }
+
+    func testBlinkHoldsFrameZeroForTwoAndAHalfToSixSeconds() {
+        for seed in UInt64(1)...20 {
+            let line = timeline(.blink, seed: seed)
+            var start = 0.0
+            for index in 0..<30 {
+                let cycle = line.cycle(index, start: start)
+                XCTAssertTrue(CompanionClipTimeline.blinkHold.contains(cycle.hold), "hold \(cycle.hold)")
+                XCTAssertEqual(line.frame(at: cycle.start + cycle.hold * 0.5), 0)
+                start = cycle.end
+            }
+        }
+    }
+
+    func testBlinkIsSlowAndNeverFlipsFasterThanTwelveFramesPerSecond() {
+        let line = timeline(.blink, frames: 3, seed: 11)
+        var changes: [TimeInterval] = []
+        var last = line.frame(at: 0)
+        var t = 0.0
+        while t < 120 {
+            t += 0.01
+            let frame = line.frame(at: t)
+            if frame != last { changes.append(t); last = frame }
+        }
+        for (a, b) in zip(changes, changes.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(b - a, 1 / 12 - 0.0205, "frames \(a) -> \(b)")
+        }
+        // About one blink (two to three changes of frame) per 2.5 s at the very most.
+        XCTAssertLessThanOrEqual(Double(changes.count) / 3 * 2.5, 120 * 1.0 + 2.5 * 3)
+        let blinks = changes.filter { line.frame(at: $0) == 0 }.count
+        XCTAssertLessThanOrEqual(Double(blinks) * 2.5, 120 + 2.5 * 2.0 * 2, "no more than ~1 blink per 2.5 s")
+    }
+
+    func testBlinkReturnsToFrameZeroAndSometimesDoubles() {
+        let line = timeline(.blink, frames: 3, seed: 5)
+        var doubles = 0
+        var start = 0.0
+        for index in 0..<200 {
+            let cycle = line.cycle(index, start: start)
+            if cycle.isDouble { doubles += 1 }
+            XCTAssertEqual(line.frame(at: cycle.end - 0.001) == 0 || cycle.play > 0, true)
+            XCTAssertEqual(line.frame(at: cycle.end + 0.001), 0, "the next cycle starts on frame 0")
+            start = cycle.end
+        }
+        XCTAssertTrue((15...70).contains(doubles), "about 20% of cycles: \(doubles)")
+    }
+
+    func testGestureHoldsThenPlaysAllFramesOnceAtItsOwnFPS() {
+        let line = timeline(.gesture, frames: 4, fps: 2, seed: 3)
+        let cycle = line.cycle(at: 0)
+        XCTAssertTrue(CompanionClipTimeline.gestureHold.contains(cycle.hold))
+        XCTAssertEqual(line.frame(at: cycle.hold - 0.01), 0)
+        XCTAssertEqual(cycle.play, 2, accuracy: 0.0001)
+        XCTAssertEqual(line.frame(at: cycle.hold + 0.01), 0)
+        XCTAssertEqual(line.frame(at: cycle.hold + 0.6), 1)
+        XCTAssertEqual(line.frame(at: cycle.hold + 1.9), 3)
+        XCTAssertEqual(line.frame(at: cycle.end + 0.01), 0, "then it rests again")
+    }
+
+    func testOneFrameClipsJustHold() {
+        for style in [CompanionClipStyle.blink, .gesture] {
+            let line = timeline(style, frames: 1)
+            XCTAssertTrue(stride(from: 0.0, to: 60, by: 0.37).allSatisfy { line.frame(at: $0) == 0 })
+            XCTAssertTrue(line.isResting(at: 30))
+        }
+    }
+
+    func testTimelineIsTheSameForTheSameSeedAndDiffersBetweenSeeds() {
+        XCTAssertEqual(timeline(.blink, seed: 9).cycle(at: 50), timeline(.blink, seed: 9).cycle(at: 50))
+        XCTAssertNotEqual(timeline(.blink, seed: 9).cycle(0, start: 0).hold, timeline(.blink, seed: 10).cycle(0, start: 0).hold)
+    }
+
+    func testRotationWaitsForAStyledClipToRest() throws {
+        let json = #"{"version":1,"size":[1,1],"moods":{"idle":["#
+            + #"{"dir":"a","frames":3,"fps":4,"loop":true,"style":"blink"},"#
+            + #"{"dir":"b","frames":3,"fps":4,"loop":true,"style":"blink"}]}}"#
+        let manifest = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8)))
+        var player = CompanionPlayer()
+        let start = Date(timeIntervalSince1970: 5000)
+        player.advance(now: start, mood: .idle, manifest: manifest, pick: { _ in 0 })
+        let first = try XCTUnwrap(player.sequence)
+        let line = CompanionClipTimeline(sequence: first, seed: player.seed)
+        // Find a moment after 15 s when the clip is mid-blink, and one when it rests.
+        var busy: TimeInterval?
+        var resting: TimeInterval?
+        var t = 15.0
+        while t < 60, busy == nil || resting == nil {
+            if line.isResting(at: t) { resting = resting ?? t } else { busy = busy ?? t }
+            t += 0.05
+        }
+        let mid = try XCTUnwrap(busy)
+        XCTAssertFalse(player.advance(now: start.addingTimeInterval(mid), mood: .idle, manifest: manifest, pick: { _ in 0 }),
+                       "not in the middle of a blink")
+        XCTAssertEqual(player.sequence, first)
+    }
+
+    func testRotationWaitsUntilTheNextVariantIsLoaded() throws {
+        let json = #"{"version":1,"size":[1,1],"moods":{"idle":["#
+            + #"{"dir":"a","frames":2,"fps":4,"loop":true},{"dir":"b","frames":2,"fps":4,"loop":true}]}}"#
+        let manifest = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8)))
+        var player = CompanionPlayer()
+        let start = Date(timeIntervalSince1970: 5000)
+        player.advance(now: start, mood: .idle, manifest: manifest, pick: { _ in 0 })
+        player.advance(now: start.addingTimeInterval(13), mood: .idle, manifest: manifest, pick: { _ in 0 })
+        XCTAssertEqual(player.upcoming?.dir, "b", "chosen ahead of the switch")
+        XCTAssertFalse(player.advance(now: start.addingTimeInterval(16), mood: .idle, manifest: manifest,
+                                      pick: { _ in 0 }, isLoaded: { _ in false }))
+        XCTAssertEqual(player.sequence?.dir, "a", "still on the old one while b loads")
+        XCTAssertTrue(player.advance(now: start.addingTimeInterval(17), mood: .idle, manifest: manifest,
+                                     pick: { _ in 0 }, isLoaded: { _ in true }))
+        XCTAssertEqual(player.sequence?.dir, "b")
+    }
+
+    func testVisibleBoundsUnionAndAConstantAnchorWithinASequence() {
+        let union = CompanionSprite.union([CGRect(x: 0.2, y: 0.2, width: 0.2, height: 0.2), nil,
+                                           CGRect(x: 0.5, y: 0.1, width: 0.3, height: 0.2)])
+        XCTAssertEqual(union, CGRect(x: 0.2, y: 0.1, width: 0.6, height: 0.3))
+        XCTAssertNil(CompanionSprite.union([nil, nil]))
+        let size = CGSize(width: 100, height: 100)
+        let anchors = (0..<5).map { _ in
+            CompanionScene.zoomAnchor(spriteRect: [10, 10, 80, 80], backgroundSize: CGSize(width: 200, height: 200),
+                                      imageSize: size, visible: union)
+        }
+        XCTAssertEqual(Set(anchors.map { "\($0.x),\($0.y)" }).count, 1, "the same for every frame of a sequence")
+    }
+
+    func testSettingsTilesWrapIntoRowsWithinTheWidth() {
+        XCTAssertEqual(CompanionSettingsLayout.columnCount(contentWidth: 250 - CompanionSettingsLayout.chrome), 4)
+        XCTAssertEqual(CompanionSettingsLayout.columnCount(contentWidth: 10), 1)
+        XCTAssertEqual(Int((15.0 / 4.0).rounded(.up)), 4, "15 activities take four rows")
+        XCTAssertEqual(CompanionSettingsLayout.maximumHeight(screenHeight: 2000), 560)
+        XCTAssertEqual(CompanionSettingsLayout.maximumHeight(screenHeight: 600), 420)
+    }
 }

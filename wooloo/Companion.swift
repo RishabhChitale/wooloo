@@ -41,6 +41,10 @@ struct CompanionSequence: Decodable, Equatable, Sendable {
     let frames: Int
     let fps: Double
     let loop: Bool
+    /// "loop" (the default), "blink" or "gesture": how the frames are timed; see `CompanionClipTimeline`.
+    var style: String?
+
+    var isStyled: Bool { CompanionClipStyle(style) != .loop }
 
     /// Frame files are `<dir>/0.png`…; a folder outside the companion's own is never read.
     var isValid: Bool {
@@ -319,6 +323,115 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
 
 /// Which sequence and speech line show now. Pure, so rotation is testable: `pick` returns an index
 /// below its argument.
+enum CompanionClipStyle: String, Sendable {
+    case loop, blink, gesture
+
+    init(_ name: String?) { self = name.flatMap { Self(rawValue: $0.lowercased()) } ?? .loop }
+}
+
+/// The timing of a "blink" or "gesture" clip, as a pure function of the time since it started.
+/// Frame 0 is held for a random while, then the rest plays once; every cycle draws its own
+/// numbers from `seed`, so it never settles into a rhythm.
+struct CompanionClipTimeline: Sendable {
+    static let blinkFPS = 12.0
+    static let blinkHold: ClosedRange<Double> = 2.5...6.0
+    static let gestureHold: ClosedRange<Double> = 1.5...4.0
+    static let doubleBlinkChance = 0.2
+    /// The pause between the two blinks of a double blink.
+    static let doubleBlinkGap = 0.12
+
+    let style: CompanionClipStyle
+    let frames: Int
+    let fps: Double
+    let seed: UInt64
+
+    init(sequence: CompanionSequence, seed: UInt64) {
+        self.init(style: CompanionClipStyle(sequence.style), frames: sequence.frames, fps: sequence.fps, seed: seed)
+    }
+
+    init(style: CompanionClipStyle, frames: Int, fps: Double, seed: UInt64) {
+        self.style = style
+        self.frames = max(1, frames)
+        self.fps = fps > 0 ? fps : 1
+        self.seed = seed
+    }
+
+    struct Cycle: Equatable, Sendable {
+        let start: TimeInterval
+        let hold: TimeInterval
+        /// How long the moving part lasts (0 for a one-frame clip).
+        let play: TimeInterval
+        let isDouble: Bool
+        var end: TimeInterval { start + hold + play }
+    }
+
+    /// A number in 0..<1 that depends on the seed, the cycle and what it is for.
+    static func unit(seed: UInt64, cycle: Int, salt: UInt64) -> Double {
+        var z = seed &+ UInt64(truncatingIfNeeded: cycle) &* 0x9E37_79B9_7F4A_7C15 &+ salt &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        z ^= z >> 31
+        return Double(z >> 11) / Double(1 << 53)
+    }
+
+    private var blinkLength: TimeInterval { Double(frames) / Self.blinkFPS }
+
+    func cycle(_ index: Int, start: TimeInterval) -> Cycle {
+        guard frames > 1, style != .loop else { return Cycle(start: start, hold: 3600, play: 0, isDouble: false) }
+        let range = style == .blink ? Self.blinkHold : Self.gestureHold
+        let hold = range.lowerBound + Self.unit(seed: seed, cycle: index, salt: 1) * (range.upperBound - range.lowerBound)
+        switch style {
+        case .blink:
+            let double = Self.unit(seed: seed, cycle: index, salt: 2) < Self.doubleBlinkChance
+            let play = double ? blinkLength * 2 + Self.doubleBlinkGap : blinkLength
+            return Cycle(start: start, hold: hold, play: play, isDouble: double)
+        default:
+            return Cycle(start: start, hold: hold, play: Double(frames) / fps, isDouble: false)
+        }
+    }
+
+    /// The cycle that `elapsed` seconds in falls into.
+    func cycle(at elapsed: TimeInterval) -> Cycle {
+        let target = min(max(0, elapsed), 3600)
+        var index = 0
+        var current = cycle(0, start: 0)
+        while target >= current.end, index < 5000 {
+            index += 1
+            current = cycle(index, start: current.end)
+        }
+        return current
+    }
+
+    /// The frame to show, and whether the clip is at rest on frame 0 (a good moment to switch).
+    func frame(at elapsed: TimeInterval) -> Int {
+        let current = cycle(at: elapsed)
+        let t = min(max(0, elapsed), 3600) - current.start - current.hold
+        guard t >= 0, frames > 1 else { return 0 }
+        switch style {
+        case .loop: return 0
+        case .gesture: return min(Int(t * fps), frames - 1)
+        case .blink:
+            func blinkFrame(_ t: TimeInterval) -> Int {
+                let step = Int(t * Self.blinkFPS)
+                // Frames 1…n-1, then back to 0.
+                return step >= frames - 1 ? 0 : step + 1
+            }
+            if current.isDouble {
+                if t < blinkLength { return blinkFrame(t) }
+                let second = t - blinkLength - Self.doubleBlinkGap
+                return second < 0 ? 0 : blinkFrame(second)
+            }
+            return blinkFrame(t)
+        }
+    }
+
+    /// Whether `elapsed` falls in a hold, with its frame 0 showing.
+    func isResting(at elapsed: TimeInterval) -> Bool {
+        let current = cycle(at: elapsed)
+        return min(max(0, elapsed), 3600) - current.start < current.hold
+    }
+}
+
 struct CompanionPlayer {
     static let loopRotation: TimeInterval = 15
     static let lineRotation: TimeInterval = 20
@@ -327,6 +440,10 @@ struct CompanionPlayer {
     private(set) var playingKey: String?
     private(set) var sequence: CompanionSequence?
     private(set) var sequenceStart = Date.distantPast
+    /// Seeds the timing of a blink or gesture clip; new for every sequence that starts.
+    private(set) var seed: UInt64 = 0
+    /// The variant chosen to follow the loop in play, so its frames can load before the switch.
+    private(set) var upcoming: CompanionSequence?
     private(set) var line: String?
     private var playingLineKey: String?
     private var lineStart = Date.distantPast
@@ -336,23 +453,42 @@ struct CompanionPlayer {
     @discardableResult
     mutating func advance(now: Date, mood newMood: CompanionMood, manifest: CompanionManifest,
                           sequenceKey: String? = nil, skin: String? = nil, lineKey: String? = nil,
-                          pick: (Int) -> Int = { Int.random(in: 0..<$0) }) -> Bool {
+                          pick: (Int) -> Int = { Int.random(in: 0..<$0) },
+                          isLoaded: (CompanionSequence) -> Bool = { _ in true }) -> Bool {
         var changed = false
         let moodChanged = mood != newMood
         let key = sequenceKey ?? newMood.rawValue
         let identity = (skin ?? "") + "|" + key
         let keyChanged = playingKey != identity
         let elapsed = now.timeIntervalSince(sequenceStart)
-        if moodChanged || keyChanged || sequence == nil
-            || (sequence.map { $0.loop ? elapsed >= Self.loopRotation : elapsed >= $0.duration } ?? true) {
+        let forced = moodChanged || keyChanged || sequence == nil
+        var due = forced
+        if !forced, let current = sequence {
+            if current.loop || current.isStyled {
+                // The next variant is chosen a little ahead so it can load; a blink or gesture
+                // is never cut in the middle, and nothing is switched to before it is loaded.
+                if upcoming == nil, elapsed >= Self.loopRotation - 3, elapsed < Self.loopRotation {
+                    let others = manifest.sequences(forKey: key, skin: skin).filter { $0 != current }
+                    upcoming = others.isEmpty ? nil : others[pick(others.count)]
+                }
+                let resting = !current.isStyled
+                    || CompanionClipTimeline(sequence: current, seed: seed).isResting(at: elapsed)
+                due = elapsed >= Self.loopRotation && resting && (upcoming.map(isLoaded) ?? true)
+            } else {
+                due = elapsed >= current.duration
+            }
+        }
+        if due {
             let choices = manifest.sequences(forKey: key, skin: skin)
             // Not the same sequence twice in a row when there is another one.
             let others = choices.filter { $0 != sequence }
             let pool = others.isEmpty || moodChanged || keyChanged ? choices : others
-            let next = pool.isEmpty ? nil : pool[pick(pool.count)]
+            let next = (forced ? nil : upcoming) ?? (pool.isEmpty ? nil : pool[pick(pool.count)])
             changed = true
             sequence = next
             sequenceStart = now
+            upcoming = nil
+            seed = UInt64(truncatingIfNeeded: pick(Int(Int32.max)))
         }
         let linesKey = lineKey ?? newMood.rawValue
         // A missing line is not retried every tick: a mood without lines simply has none.
@@ -372,9 +508,17 @@ struct CompanionPlayer {
         return changed
     }
 
-    /// The frame to show at `now`: a loop wraps, a one-shot holds its last frame.
+    /// Starts the sequence's clock again, for when its frames finished loading after it was chosen.
+    mutating func restartClock(now: Date) { sequenceStart = now }
+
+    /// The frame to show at `now`: a loop wraps, a one-shot holds its last frame, a blink or
+    /// gesture follows its own timing.
     func frameIndex(at now: Date) -> Int {
         guard let sequence else { return 0 }
+        if sequence.isStyled {
+            return CompanionClipTimeline(sequence: sequence, seed: seed)
+                .frame(at: now.timeIntervalSince(sequenceStart))
+        }
         let step = Int(max(0, now.timeIntervalSince(sequenceStart)) * sequence.fps)
         return sequence.loop ? step % sequence.frames : min(step, sequence.frames - 1)
     }
@@ -888,6 +1032,18 @@ final class CompanionModel: ObservableObject {
     private var dialogueInFlight = false
     private var directory = CompanionManifest.directory
     private var currentSkin: String?
+    /// The last sprite shown, kept on screen while the next sequence's frames load.
+    private var lastImage: CGImage?
+    private var shownDir: String?
+    private var sequenceChangedAt = Date.distantPast
+    private var fadeFrom: CGImage?
+    private var fadeStart = Date.distantPast
+    static let crossfadeDuration: TimeInterval = 0.15
+    static let holdLastImage: TimeInterval = 1
+    /// For each loaded sequence folder, the union of its frames' visible parts; the zoom is
+    /// centered on it, so it stays put while the frames change.
+    @Published private(set) var sequenceBounds: [String: CGRect] = [:]
+    private var boundsRequested: Set<String> = []
     /// The cutscene being played, if any. Changes only when one starts or ends.
     @Published private(set) var cutscene: CompanionCutscene?
     /// Decoded cutscene frames by file number; only the ones about to play are kept.
@@ -947,9 +1103,14 @@ final class CompanionModel: ObservableObject {
         if applied != emotion { emotion = applied }
         let lineKey = applied == .love && !manifest.lines(forKey: "love").isEmpty ? "love" : nil
         let key = applied?.rawValue ?? manifest.sequenceKey(mood: mood, activityID: activityID, skin: skin)
-        if next.advance(now: now, mood: mood, manifest: manifest, sequenceKey: key, skin: skin,
-                        lineKey: lineKey) { player = next }
+        let before = player.sequence
+        let changedPlayer = next.advance(now: now, mood: mood, manifest: manifest, sequenceKey: key, skin: skin,
+                                         lineKey: lineKey,
+                                         isLoaded: { [loadedDirs = Set(loaded.keys)] in loadedDirs.contains($0.dir) })
+        if changedPlayer || next.upcoming != player.upcoming { player = next }
+        if next.sequence != before { sequenceChangedAt = now }
         if let sequence = next.sequence { ensureLoaded(sequence) }
+        if let upcoming = next.upcoming { ensureLoaded(upcoming) }
         if let path = manifest.backgroundPath(at: now) { ensureImage(path) }
         publishMood(key, skin: skin ?? CompanionManifest.defaultSkin, now: now)
     }
@@ -1093,9 +1254,28 @@ final class CompanionModel: ObservableObject {
         return bounds
     }
 
+    /// The sprite frame to show. Never nothing while another sequence loads: the last frame stays
+    /// (for up to a second), and a new sequence starts from its first frame once it is loaded.
     func image(at now: Date) -> CGImage? {
-        guard let sequence = player.sequence, let frames = loaded[sequence.dir]?.images, !frames.isEmpty else { return nil }
-        return frames[min(player.frameIndex(at: now), frames.count - 1)]
+        if let sequence = player.sequence, let frames = loaded[sequence.dir]?.images, !frames.isEmpty {
+            let image = frames[min(player.frameIndex(at: now), frames.count - 1)]
+            if sequence.dir != shownDir {
+                if let lastImage { fadeFrom = lastImage; fadeStart = now }
+                shownDir = sequence.dir
+            }
+            lastImage = image
+            return image
+        }
+        if let lastImage, now.timeIntervalSince(sequenceChangedAt) < Self.holdLastImage { return lastImage }
+        return nil
+    }
+
+    /// The sprite that is fading out after a sequence change, and how opaque it still is.
+    func fadingOutImage(at now: Date) -> (image: CGImage, opacity: Double)? {
+        guard let fadeFrom else { return nil }
+        let progress = now.timeIntervalSince(fadeStart) / Self.crossfadeDuration
+        guard progress >= 0, progress < 1 else { return nil }
+        return (fadeFrom, 1 - progress)
     }
 
     private func ensureImage(_ path: String) {
@@ -1209,6 +1389,19 @@ final class CompanionModel: ObservableObject {
             }.value
             self.loaded[sequence.dir] = frames
             self.loading.remove(sequence.dir)
+            // The sequence in play starts from its first frame, not somewhere in the middle.
+            if self.player.sequence?.dir == sequence.dir { self.player.restartClock(now: Date()) }
+            self.computeBounds(for: sequence.dir, frames: frames)
+        }
+    }
+
+    private func computeBounds(for dir: String, frames: CompanionFrames) {
+        guard boundsRequested.insert(dir).inserted else { return }
+        Task {
+            let union = await Task.detached(priority: .utility) {
+                CompanionSprite.union(frames.images.map { CompanionSprite.visibleBounds(of: $0) })
+            }.value
+            if let union { self.sequenceBounds[dir] = union }
         }
     }
 }
@@ -1321,8 +1514,10 @@ extension CompanionView {
             CompanionScene(background: model.backgroundImage(at: date),
                            spriteRect: model.manifest?.spriteRect,
                            sprite: model.image(at: date),
-                           spriteVisible: model.image(at: date).flatMap { model.visibleBounds(of: $0) },
-                           zoom: CompanionPreferences.clampedZoom(zoom))
+                           spriteVisible: model.player.sequence.flatMap { model.sequenceBounds[$0.dir] },
+                           zoom: CompanionPreferences.clampedZoom(zoom),
+                           outgoing: model.fadingOutImage(at: date)?.image,
+                           outgoingOpacity: model.fadingOutImage(at: date)?.opacity ?? 0)
         }
     }
 }
@@ -1354,6 +1549,9 @@ struct CompanionScene: View {
     let sprite: CGImage?
     /// The part of the sprite image that is not transparent, as 0...1 fractions (top-left origin).
     var spriteVisible: CGRect?
+    /// The previous sequence's last frame, fading out over the new one.
+    var outgoing: CGImage?
+    var outgoingOpacity: Double = 0
     /// The whole scene is magnified by this much around her sprite's center.
     var zoom: Double = 1
 
@@ -1412,12 +1610,25 @@ struct CompanionScene: View {
             if let background, let rect = spriteRect, rect.count == 4 {
                 let size = CGSize(width: background.width, height: background.height)
                 let scale = Self.fillScale(content: size, in: area.size)
+                let anchor = Self.zoomAnchor(
+                    spriteRect: rect, backgroundSize: size,
+                    imageSize: sprite.map { CGSize(width: $0.width, height: $0.height) } ?? .zero,
+                    visible: spriteVisible)
                 ZStack(alignment: .topLeading) {
                     Image(decorative: background, scale: 1)
                         .interpolation(.none)
                         .resizable()
                         .frame(width: size.width * scale, height: size.height * scale)
                     if let sprite {
+                        if let outgoing, outgoingOpacity > 0 {
+                            Image(decorative: outgoing, scale: 1)
+                                .interpolation(.none)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: rect[2] * scale, height: rect[3] * scale)
+                                .offset(x: rect[0] * scale, y: rect[1] * scale)
+                                .opacity(outgoingOpacity)
+                        }
                         Image(decorative: sprite, scale: 1)
                             .interpolation(.none)
                             .resizable()
@@ -1427,23 +1638,23 @@ struct CompanionScene: View {
                     }
                 }
                 .frame(width: size.width * scale, height: size.height * scale)
-                .scaleEffect(zoom, anchor: Self.zoomAnchor(
-                    spriteRect: rect, backgroundSize: size,
-                    imageSize: sprite.map { CGSize(width: $0.width, height: $0.height) } ?? .zero,
-                    visible: spriteVisible))
+                .scaleEffect(zoom, anchor: anchor)
+                .animation(.easeInOut(duration: 0.35), value: anchor)
                 // Bottom-center: the extra width is cropped evenly left and right, the extra
                 // height at the top, so the picture always reaches every edge of the room.
                 .frame(width: area.size.width, height: area.size.height, alignment: .bottom)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             } else if let sprite {
+                let spriteAnchor = Self.zoomAnchor(
+                    visible: spriteVisible, imageSize: CGSize(width: sprite.width, height: sprite.height),
+                    area: area.size)
                 Image(decorative: sprite, scale: 1)
                     .interpolation(.none)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: area.size.width, height: area.size.height)
-                    .scaleEffect(zoom, anchor: Self.zoomAnchor(
-                        visible: spriteVisible, imageSize: CGSize(width: sprite.width, height: sprite.height),
-                        area: area.size))
+                    .scaleEffect(zoom, anchor: spriteAnchor)
+                    .animation(.easeInOut(duration: 0.35), value: spriteAnchor)
                     .clipped()
             }
         }
@@ -1488,6 +1699,11 @@ private struct CompanionBubble: View {
 
 /// Facts about a sprite frame's pixels.
 enum CompanionSprite {
+    /// The smallest rectangle holding all the rectangles; nil when there are none.
+    static func union(_ rects: [CGRect?]) -> CGRect? {
+        rects.compactMap { $0 }.reduce(nil) { (total: CGRect?, rect) in total.map { $0.union(rect) } ?? rect }
+    }
+
     /// The smallest rectangle, in 0...1 fractions of the image with the origin at the top left,
     /// that holds every pixel with some alpha; nil when the image is fully transparent or empty.
     static func visibleBounds(of image: CGImage) -> CGRect? {

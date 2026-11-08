@@ -199,63 +199,110 @@ struct CompanionWebcamSettings: View {
     @AppStorage(CompanionPreferences.transitionsKey) private var playsTransitions = true
     @Environment(\.woolooTypography) private var typography
 
+    @State private var contentHeight: CGFloat = 0
+
     var body: some View {
         // The [x] of the chrome closes the window.
         CompanionBox(title: "Webcam Settings", fontName: model.fontName,
                      collapsed: Binding(get: { false }, set: { _ in isPresented = false })) {
             if let manifest = model.manifest {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Skin")
-                        .font(CompanionFont.font(model.fontName, size: typography.secondary))
-                        .foregroundStyle(CompanionPalette.indigo)
-                    HStack(spacing: 4) {
-                        ForEach(manifest.skinChoices, id: \.id) { choice in
-                            let selected = manifest.resolvedSkin(skin) == choice.id
-                            Button { skin = choice.id } label: {
-                                VStack(spacing: 3) {
-                                    Group {
-                                        if let path = manifest.previewPath(skin: choice.id),
-                                           let image = model.image(forPath: path) {
-                                            Image(decorative: image, scale: 1).interpolation(.none).resizable()
-                                                .aspectRatio(contentMode: .fit)
-                                        } else {
-                                            Color.clear
-                                        }
-                                    }
-                                    .frame(width: 64, height: 44)
-                                    Text(choice.label)
-                                        .font(CompanionFont.font(model.fontName, size: typography.caption))
-                                        .foregroundStyle(CompanionPalette.indigo)
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.7)
-                                }
-                                .padding(4)
-                                .background(selected ? CompanionPalette.highlight : Color.clear,
-                                            in: RoundedRectangle(cornerRadius: 4))
-                                .overlay(RoundedRectangle(cornerRadius: 4)
-                                    .strokeBorder(CompanionPalette.indigo.opacity(selected ? 1 : 0.3), lineWidth: 1))
-                                .contentShape(Rectangle())
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Skin")
+                            .font(CompanionFont.font(model.fontName, size: typography.secondary))
+                            .foregroundStyle(CompanionPalette.indigo)
+                        LazyVGrid(columns: CompanionSettingsLayout.columns, alignment: .leading,
+                                  spacing: CompanionSettingsLayout.spacing) {
+                            ForEach(manifest.skinChoices, id: \.id) { choice in
+                                skinTile(choice, manifest: manifest)
                             }
-                            .buttonStyle(.plain)
-                            .help(choice.label)
+                        }
+                        CompanionActivityPicker(model: model)
+                        sliderRow("Size", value: $heightFactor, range: CompanionPreferences.heightFactorRange)
+                        sliderRow("Zoom", value: $zoom, range: CompanionPreferences.zoomRange)
+                        checkbox("Play transformation when changing skin", isOn: $playsTransitions)
+                        checkbox("Notify when Ame replies on JINE", isOn: $notifiesAme)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.onChange(of: proxy.size.height, initial: true) { _, height in
+                                contentHeight = height
+                            }
                         }
                     }
-                    CompanionActivityPicker(model: model)
-                    sliderRow("Size", value: $heightFactor, range: CompanionPreferences.heightFactorRange)
-                    sliderRow("Zoom", value: $zoom, range: CompanionPreferences.zoomRange)
-                    Toggle("Play transformation when changing skin", isOn: $playsTransitions)
-                        .toggleStyle(.checkbox)
-                        .font(CompanionFont.font(model.fontName, size: typography.caption))
-                        .foregroundStyle(CompanionPalette.indigo)
-                    Toggle("Notify when Ame replies on JINE", isOn: $notifiesAme)
-                        .toggleStyle(.checkbox)
-                        .font(CompanionFont.font(model.fontName, size: typography.caption))
-                        .foregroundStyle(CompanionPalette.indigo)
                 }
+                .frame(height: min(max(contentHeight, 40), CompanionSettingsLayout.maximumHeight()))
             }
         }
-        .frame(width: 250)
+        .frame(width: CompanionSettingsLayout.width)
         .padding(4)
+    }
+
+    private func skinTile(_ choice: CompanionSkinChoice, manifest: CompanionManifest) -> some View {
+        let selected = manifest.resolvedSkin(skin) == choice.id
+        return Button { skin = choice.id } label: {
+            VStack(spacing: 3) {
+                Group {
+                    if let path = manifest.previewPath(skin: choice.id), let image = model.image(forPath: path) {
+                        Image(decorative: image, scale: 1).interpolation(.none).resizable()
+                            .aspectRatio(contentMode: .fit)
+                    } else {
+                        Color.clear
+                    }
+                }
+                .frame(height: 40)
+                Text(choice.label)
+                    .font(CompanionFont.font(model.fontName, size: typography.caption))
+                    .foregroundStyle(CompanionPalette.indigo)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(3)
+            .background(selected ? CompanionPalette.highlight : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4)
+                .strokeBorder(CompanionPalette.indigo.opacity(selected ? 1 : 0.3), lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(choice.label)
+    }
+
+    private func checkbox(_ title: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            Text(title)
+                .font(CompanionFont.font(model.fontName, size: typography.caption))
+                .foregroundStyle(CompanionPalette.indigo)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+        }
+        .toggleStyle(.checkbox)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Sizes of the Webcam Settings window: tiles wrap into rows instead of one long row.
+enum CompanionSettingsLayout {
+    static let width: CGFloat = 250
+    static let spacing: CGFloat = 4
+    static let minimumTile: CGFloat = 54
+    static let maximumTile: CGFloat = 72
+    /// Frame padding (3 + 3) and content padding (6 + 6) of the box around the content.
+    static let chrome: CGFloat = 18
+
+    static var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: minimumTile, maximum: maximumTile), spacing: spacing)]
+    }
+
+    /// How many tiles fit in a row of `contentWidth`.
+    static func columnCount(contentWidth: CGFloat) -> Int {
+        max(1, Int((contentWidth + spacing) / (minimumTile + spacing)))
+    }
+
+    /// The tallest the settings may be before they scroll.
+    static func maximumHeight(screenHeight: CGFloat = NSScreen.main?.visibleFrame.height ?? 800) -> CGFloat {
+        min(560, max(200, screenHeight * 0.7))
     }
 }
 
@@ -284,7 +331,8 @@ struct CompanionActivityPicker: View {
                 Text("Activities")
                     .font(CompanionFont.font(model.fontName, size: typography.secondary))
                     .foregroundStyle(CompanionPalette.indigo)
-                HStack(alignment: .top, spacing: 2) {
+                LazyVGrid(columns: CompanionSettingsLayout.columns, alignment: .leading,
+                          spacing: CompanionSettingsLayout.spacing) {
                     ForEach(activities) { activity in
                         let available = activity.mood != nil
                         Button { selected = activity.id } label: {
