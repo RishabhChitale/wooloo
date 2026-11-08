@@ -2054,4 +2054,15 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(CompanionFrames.index(2, loadedCount: 5), 2)
         XCTAssertEqual(CompanionFrames.index(-3, loadedCount: 5), 0)
     }
+
+    func testHeartsCropKeepsTheRightmostFortyPercentAndDrawsAtRoomHeight() throws {
+        let rect = try XCTUnwrap(CompanionHeartsCrop.cropRect(imageSize: CGSize(width: 696, height: 454)))
+        XCTAssertEqual(rect, CGRect(x: 696 - 279, y: 0, width: 279, height: 454))
+        XCTAssertLessThanOrEqual(rect.minX, 636)
+        XCTAssertNil(CompanionHeartsCrop.cropRect(imageSize: .zero))
+        let size = CompanionHeartsCrop.drawSize(cropSize: rect.size, roomHeight: 227)
+        XCTAssertEqual(size.height, 227)
+        XCTAssertEqual(size.width, 279 * 0.5, accuracy: 0.001)
+        XCTAssertEqual(CompanionHeartsCrop.drawSize(cropSize: rect.size, roomHeight: 0), .zero)
+    }
 }

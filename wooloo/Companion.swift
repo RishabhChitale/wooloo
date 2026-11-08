@@ -1384,7 +1384,12 @@ final class CompanionModel: ObservableObject {
                     let folder = root.appendingPathComponent(dir, isDirectory: true)
                     return (0..<count).compactMap { Self.readFrame(folder.appendingPathComponent("\($0).png")) }
                 }
-                return (read(scene.out, scene.outFrames), read(scene.hearts, scene.heartFrames))
+                // The hearts sit at the far right of a wide canvas: keep only that part of each frame.
+                let hearts = read(scene.hearts, scene.heartFrames).map { frame in
+                    CompanionHeartsCrop.cropRect(imageSize: CGSize(width: frame.width, height: frame.height))
+                        .flatMap { frame.cropping(to: $0) } ?? frame
+                }
+                return (read(scene.out, scene.outFrames), hearts)
             }.value
             guard self.cuddleLoadToken == token else { return }
             self.cuddleLoadToken = nil
@@ -1996,22 +2001,44 @@ extension CompanionView {
     }
 }
 
-/// The hearts art of the cuddle scene: its canvas height is the room's height, the canvas is
-/// right-aligned to the room's right edge and clipped, nearest-neighbour; no camera, no zoom.
+/// The hearts art of the cuddle scene, already cropped to the right part of its canvas: drawn
+/// nearest-neighbour at the room's height, on the room's trailing edge, inside the room's clip.
 struct CompanionCuddleHearts: View {
     let image: CGImage
 
     var body: some View {
         GeometryReader { area in
-            let scale = image.height > 0 ? area.size.height / CGFloat(image.height) : 1
+            let size = CompanionHeartsCrop.drawSize(cropSize: CGSize(width: image.width, height: image.height),
+                                                    roomHeight: area.size.height)
             Image(decorative: image, scale: 1)
                 .interpolation(.none)
                 .resizable()
-                .frame(width: CGFloat(image.width) * scale, height: area.size.height)
-                .frame(width: area.size.width, height: area.size.height, alignment: .trailing)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .frame(width: size.width, height: size.height)
+                .position(x: area.size.width - size.width / 2, y: area.size.height / 2)
         }
+        .clipShape(RoundedRectangle(cornerRadius: 6))
         .allowsHitTesting(false)
+    }
+}
+
+/// The math of the hearts crop: the rightmost part of the canvas, whole height, and its size when
+/// drawn at the room's height.
+enum CompanionHeartsCrop {
+    static let fraction: CGFloat = 0.4
+
+    /// The pixel rect to keep: the rightmost `fraction` of the width, the full height.
+    static func cropRect(imageSize: CGSize) -> CGRect? {
+        let width = imageSize.width.rounded(.down), height = imageSize.height.rounded(.down)
+        guard width >= 1, height >= 1 else { return nil }
+        let keep = max(1, (width * fraction).rounded(.up))
+        return CGRect(x: width - keep, y: 0, width: keep, height: height)
+    }
+
+    /// The size on screen: as tall as the room, as wide as the crop scaled by the same factor.
+    static func drawSize(cropSize: CGSize, roomHeight: CGFloat) -> CGSize {
+        guard cropSize.width > 0, cropSize.height > 0, roomHeight > 0 else { return .zero }
+        let scale = roomHeight / cropSize.height
+        return CGSize(width: cropSize.width * scale, height: roomHeight)
     }
 }
 
