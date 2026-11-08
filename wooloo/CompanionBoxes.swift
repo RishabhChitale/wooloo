@@ -18,6 +18,12 @@ enum CompanionPreferences {
     /// How far the scene is magnified around her sprite.
     /// Whether changing skin plays its cutscene, when the manifest has one; on unless turned off.
     static let transitionsKey = "companionTransitions"
+    /// Whether Ame texts on her own now and then; on unless turned off.
+    static let nudgesKey = "companionNudges"
+
+    static func nudgesEnabled(defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: nudgesKey) as? Bool ?? true
+    }
 
     static func playsTransitions(defaults: UserDefaults = .standard) -> Bool {
         defaults.object(forKey: transitionsKey) as? Bool ?? true
@@ -197,6 +203,7 @@ struct CompanionWebcamSettings: View {
     @AppStorage(CompanionPreferences.zoomKey) private var zoom = CompanionPreferences.defaultZoom
     @AppStorage(HerdrNotifier.notifyAmeKey) private var notifiesAme = false
     @AppStorage(CompanionPreferences.transitionsKey) private var playsTransitions = true
+    @AppStorage(CompanionPreferences.nudgesKey) private var nudges = true
     @Environment(\.woolooTypography) private var typography
 
     @State private var contentHeight: CGFloat = 0
@@ -222,6 +229,7 @@ struct CompanionWebcamSettings: View {
                         sliderRow("Zoom", value: $zoom, range: CompanionPreferences.zoomRange)
                         checkbox("Play transformation when changing skin", isOn: $playsTransitions)
                         checkbox("Notify when Ame replies on JINE", isOn: $notifiesAme)
+                        checkbox("Ame texts me on her own", isOn: $nudges)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background {

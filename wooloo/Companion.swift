@@ -648,9 +648,31 @@ struct CompanionMessage: Equatable, Sendable {
     static let maximumDisplayLength = 2000
     static let maximumSendLength = 4000
 
-    /// Markdown stripped, lines joined, capped for a bubble.
+    /// The moods Ame can name in a trailing `[mood: X]`.
+    static let validMoods: Set<String> = ["working", "idle", "done", "waiting", "angry", "stressed", "sad",
+                                          "crying", "scared", "love"]
+
+    /// Splits a trailing `[mood: X]` (any case, trailing spaces allowed) off a text. An unknown X
+    /// is not a tag: the text stays as it is.
+    static func moodTag(in text: String) -> (clean: String, mood: String?) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix("]"), let open = trimmed.lastIndex(of: "[") else { return (text, nil) }
+        let inner = trimmed[trimmed.index(after: open)..<trimmed.index(before: trimmed.endIndex)]
+        let lowered = inner.lowercased()
+        guard lowered.hasPrefix("mood:") else { return (text, nil) }
+        let name = lowered.dropFirst("mood:".count).trimmingCharacters(in: .whitespaces)
+        guard validMoods.contains(name) else { return (text, nil) }
+        return (String(trimmed[..<open]).trimmingCharacters(in: .whitespacesAndNewlines), name)
+    }
+
+    /// The mood Ame tagged this text with, if any.
+    var mood: String? { Self.moodTag(in: text).mood }
+
+    /// The mood tag removed, markdown stripped, emoji turned into text emoticons, lines joined,
+    /// capped for a bubble.
     var displayText: String {
-        let flat = CompanionDialogue.stripMarkdown(text).replacingOccurrences(of: "\n", with: " ")
+        let flat = CompanionText.sanitized(CompanionDialogue.stripMarkdown(Self.moodTag(in: text).clean))
+            .replacingOccurrences(of: "\n", with: " ")
         guard flat.count > Self.maximumDisplayLength else { return flat }
         return String(flat.prefix(Self.maximumDisplayLength - 1)).trimmingCharacters(in: .whitespaces) + "…"
     }
@@ -1008,6 +1030,9 @@ final class CompanionModel: ObservableObject {
     private var textTime: Date?
     private var commanderLoveTime: Date?
     private var ameLoveTime: Date?
+    /// The mood of Ame's newest JINE reply, and when it was sent.
+    private var ameMood: String?
+    private var ameMoodTime: Date?
     /// The newest affectionate message of the user to the commander or to Ame.
     private var loveTime: Date? { CompanionAffection.later(commanderLoveTime, ameLoveTime) }
     private let ameReader = CompanionTranscriptReader()
@@ -1102,7 +1127,21 @@ final class CompanionModel: ObservableObject {
         let applied = candidate.flatMap { manifest.hasOwnSequences(forKey: $0.rawValue, skin: skin) ? $0 : nil }
         if applied != emotion { emotion = applied }
         let lineKey = applied == .love && !manifest.lines(forKey: "love").isEmpty ? "love" : nil
-        let key = applied?.rawValue ?? manifest.sequenceKey(mood: mood, activityID: activityID, skin: skin)
+        let commanderKey = applied?.rawValue ?? manifest.sequenceKey(mood: mood, activityID: activityID, skin: skin)
+        // Ame's own mood from her newest JINE reply wins for ten minutes, except while the user's
+        // love reaction shows.
+        let loveReaction = loveTime.map { now.timeIntervalSince($0) <= CompanionAffection.duration } ?? false
+        var key = commanderKey
+        let wanted = CompanionMoodResolver.effective(
+            commanderKey: commanderKey, ameMood: ameMood, age: ameMoodTime.map { now.timeIntervalSince($0) },
+            loveReaction: loveReaction)
+        if wanted != commanderKey {
+            if let base = CompanionMood(rawValue: wanted) {
+                key = manifest.sequenceKey(mood: base, activityID: activityID, skin: skin)
+            } else if manifest.hasOwnSequences(forKey: wanted, skin: skin) {
+                key = wanted
+            }
+        }
         let before = player.sequence
         let changedPlayer = next.advance(now: now, mood: mood, manifest: manifest, sequenceKey: key, skin: skin,
                                          lineKey: lineKey,
@@ -1175,6 +1214,8 @@ final class CompanionModel: ObservableObject {
             ameRequested = .distantPast
             if !messages.isEmpty { messages = [] }
             ameLoveTime = nil
+            ameMood = nil
+            ameMoodTime = nil
             unread = CompanionUnread()
             if unreadCount != 0 { unreadCount = 0 }
         }
@@ -1192,6 +1233,17 @@ final class CompanionModel: ObservableObject {
             if next != self.messages { self.messages = next }
             let loveLabels = (self.manifest?.stickers ?? []).filter { $0.id == "love" }.map(\.label)
             self.ameLoveTime = CompanionAffection.newestLove(in: shown, extra: loveLabels)
+            // Her newest reply decides how she feels: the tag, else the emotion words of the text.
+            if let reply = shown.last(where: { $0.role == .assistant && $0.time != nil }), let time = reply.time {
+                let wording = CompanionEmotionRules.resolve(
+                    mood: .idle, signals: CompanionTextSignals(text: CompanionMessage.moodTag(in: reply.text).clean),
+                    textTime: time, statusElapsed: 0, now: time)
+                self.ameMood = reply.mood ?? wording?.rawValue
+                self.ameMoodTime = time
+            } else {
+                self.ameMood = nil
+                self.ameMoodTime = nil
+            }
             self.updateUnread()
         }
     }
@@ -1210,11 +1262,13 @@ final class CompanionModel: ObservableObject {
     /// Called often: sends a nudge to Ame when one is due. Never logs or keeps the text.
     func tickNudge(now: Date, ame: HerdrAgent?, commanderStatus: String?, store: HerdrStore) {
         guard manifest != nil, let ame, store.isConnected else { return }
-        let idle = CompanionMood(agentStatus: ame.agentStatus) == .idle
-        guard nudges.due(now: now, ameIsIdle: idle) else { return }
+        guard CompanionPreferences.nudgesEnabled() else { return }
+        let mood = publishedKey ?? "idle"
+        guard nudges.due(now: now, ameIsIdle: CompanionNudge.isAvailable(status: ame.agentStatus), mood: mood)
+        else { return }
         let hint = CompanionNudge.hint(commanderWorking: CompanionMood(agentStatus: commanderStatus) == .working,
                                        runningTasks: 0)
-        guard let params = CompanionMessage.promptParams(paneID: ame.paneID, text: CompanionNudge.text(now: now, hint: hint))
+        guard let params = CompanionMessage.promptParams(paneID: ame.paneID, text: CompanionNudge.text(now: now, mood: mood, doing: nil, hint: hint))
         else { return }
         Task { try? await store.sendAgentPrompt(params) }
     }
@@ -1668,7 +1722,7 @@ private struct CompanionBubble: View {
     @Environment(\.woolooTypography) private var typography
 
     var body: some View {
-        Text(text)
+        Text(CompanionText.sanitized(text))
             .font(.system(size: typography.secondary))
             .foregroundStyle(Color(red: 0.22, green: 0.15, blue: 0.3))
             .lineLimit(4)
@@ -1738,22 +1792,72 @@ enum CompanionSprite {
 
 // MARK: Side chat with Ame
 
+/// How Ame feels, grouped by how often she wants to text.
+enum CompanionNudgeMood: Equatable, Sendable {
+    case lonely, loving, happy, calm, upset, busy
+
+    init(key: String) {
+        switch key.lowercased() {
+        case "waiting": self = .lonely
+        case "love": self = .loving
+        case "done": self = .happy
+        case "sad", "crying", "scared", "stressed", "angry": self = .upset
+        case "working": self = .busy
+        default: self = .calm
+        }
+    }
+
+    /// Seconds between two nudges while she feels this way.
+    var delayRange: ClosedRange<TimeInterval> {
+        switch self {
+        case .lonely: return (20 * 60)...(50 * 60)
+        case .loving: return (30 * 60)...(70 * 60)
+        case .happy: return (40 * 60)...(90 * 60)
+        case .calm: return (45 * 60)...(120 * 60)
+        case .upset: return (25 * 60)...(60 * 60)
+        case .busy: return (60 * 60)...(150 * 60)
+        }
+    }
+}
+
 /// The random texts the app sends to the "ame" agent, and which messages the JINE box hides.
 enum CompanionNudge {
     static let prefix = "[nudge]"
-    /// Seconds between two nudges, drawn at random.
-    static let delayRange: ClosedRange<TimeInterval> = (45 * 60)...(150 * 60)
+    static let stylePrefix = "[style]"
     /// Local hours in which nothing is sent: 01:00 up to 09:00.
     static let quietHours = 1..<9
     static let maximumPerDay = 8
+    /// A reply this short right after a `[style]` turn is only an acknowledgement.
+    static let acknowledgementLength = 40
 
-    static func isNudge(_ text: String) -> Bool {
-        text.drop(while: { $0.isWhitespace }).hasPrefix(prefix)
+    private static func startsWith(_ text: String, _ prefix: String) -> Bool {
+        text.drop(while: { $0.isWhitespace }).lowercased().hasPrefix(prefix)
     }
 
-    /// Without the user messages that are nudges.
+    static func isNudge(_ text: String) -> Bool { startsWith(text, prefix) }
+    static func isStyle(_ text: String) -> Bool { startsWith(text, stylePrefix) }
+
+    /// Without the user messages that are nudges or `[style]` instructions, and without Ame's
+    /// short acknowledgement right after a `[style]` one.
     static func visible(_ messages: [CompanionMessage]) -> [CompanionMessage] {
-        messages.filter { !($0.role == .user && isNudge($0.text)) }
+        var result: [CompanionMessage] = []
+        var hideAcknowledgement = false
+        for message in messages {
+            defer { hideAcknowledgement = message.role == .user && isStyle(message.text) }
+            if message.role == .user, isNudge(message.text) || isStyle(message.text) { continue }
+            if hideAcknowledgement, message.role == .assistant,
+               message.text.trimmingCharacters(in: .whitespacesAndNewlines).count <= acknowledgementLength { continue }
+            result.append(message)
+        }
+        return result
+    }
+
+    /// Ame can take a text unless she is working on something or waiting for an answer.
+    static func isAvailable(status: String?) -> Bool {
+        switch status?.lowercased() {
+        case "working", "blocked", "needs-input", "needs_input", "request": return false
+        default: return true
+        }
     }
 
     static func isQuiet(_ date: Date, calendar: Calendar = .current) -> Bool {
@@ -1770,45 +1874,99 @@ enum CompanionNudge {
         return commanderWorking ? "the commander is working" : "everything is quiet"
     }
 
-    /// "[nudge] it's Tuesday 3:05 PM; everything is quiet"
-    static func text(now: Date, hint: String, calendar: Calendar = .current) -> String {
+    /// How a mood key reads in a nudge.
+    static func moodWord(_ key: String) -> String {
+        switch key.lowercased() {
+        case "done": return "happy"
+        case "love": return "loving"
+        case "waiting": return "lonely"
+        case "angry": return "annoyed"
+        case "stressed": return "anxious"
+        case "sad": return "sad"
+        case "crying": return "very sad"
+        case "scared": return "scared"
+        case "working": return "busy"
+        default: return "calm"
+        }
+    }
+
+    /// What an ambient clip is, in words; nil for a key without a phrase.
+    static func doingPhrase(forAmbientKey key: String) -> String? {
+        [
+            "tweet": "tweeting", "sleep": "sleeping", "tv": "watching TV", "music": "listening to music",
+            "spinner": "spinning a hand spinner", "comics": "reading comics", "selfcare": "doing self-care",
+            "voice": "voice training", "egosearch": "ego-searching", "out": "out and about",
+            "streamprep": "stream prep",
+        ][key.lowercased()]
+    }
+
+    /// "[nudge] it's Sunday 2:40 AM; mood: lonely; doing: reading comics; the commander is working"
+    static func text(now: Date, mood: String = "idle", doing: String? = nil, hint: String,
+                     calendar: Calendar = .current) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "EEEE h:mm a"
-        return "\(prefix) it's \(formatter.string(from: now)); \(hint)"
+        return "\(prefix) it's \(formatter.string(from: now)); mood: \(moodWord(mood)); "
+            + "doing: \(doing ?? "just hanging out"); \(hint)"
     }
 }
 
-/// When the next nudge is due. The count per local day is kept in UserDefaults; the next time
-/// lives only while the app runs.
+/// When the next nudge is due. The count per local day and the next time are kept in UserDefaults,
+/// so relaunching the app neither resets the wait nor sends one at once.
 struct CompanionNudgeScheduler {
     static let dayKey = "companionNudgeDay"
     static let countKey = "companionNudgeCount"
+    static let nextKey = "companionNudgeNext"
+    /// A saved time that has already passed waits this long after launch.
+    static let relaunchDelay: TimeInterval = 10 * 60
 
     private(set) var nextFire: Date?
+    private var pickedFor: CompanionNudgeMood?
+    private var rerolled = false
+
+    private mutating func schedule(_ date: Date, mood: CompanionNudgeMood, defaults: UserDefaults,
+                                   rerolled: Bool = false) {
+        nextFire = date
+        pickedFor = mood
+        self.rerolled = rerolled
+        defaults.set(date.timeIntervalSince1970, forKey: Self.nextKey)
+    }
 
     /// True once, when a nudge should go out now; this counts it and picks the next time. Out of
-    /// hours or past the daily limit the time is only moved on. A busy Ame waits, without moving it.
-    mutating func due(now: Date, ameIsIdle: Bool, calendar: Calendar = .current,
+    /// hours or past the daily limit the time is only moved on. A busy Ame waits, without moving
+    /// it. If her mood turns into another kind while waiting, the wait is drawn again once.
+    mutating func due(now: Date, ameIsIdle: Bool, mood: String = "idle", calendar: Calendar = .current,
                       defaults: UserDefaults = .standard,
                       random: (ClosedRange<TimeInterval>) -> TimeInterval = { Double.random(in: $0) }) -> Bool {
+        let kind = CompanionNudgeMood(key: mood)
         guard let fire = nextFire else {
-            nextFire = now.addingTimeInterval(random(CompanionNudge.delayRange))
+            let saved = defaults.double(forKey: Self.nextKey)
+            if saved > now.timeIntervalSince1970 {
+                schedule(Date(timeIntervalSince1970: saved), mood: kind, defaults: defaults)
+            } else if saved > 0 {
+                schedule(now.addingTimeInterval(Self.relaunchDelay), mood: kind, defaults: defaults)
+            } else {
+                schedule(now.addingTimeInterval(random(kind.delayRange)), mood: kind, defaults: defaults)
+            }
+            return false
+        }
+        if kind != pickedFor, !rerolled, now < fire {
+            schedule(now.addingTimeInterval(random(kind.delayRange)), mood: kind, defaults: defaults, rerolled: true)
             return false
         }
         guard now >= fire else { return false }
         let today = CompanionNudge.dayKey(now, calendar: calendar)
         let sent = defaults.string(forKey: Self.dayKey) == today ? defaults.integer(forKey: Self.countKey) : 0
         if CompanionNudge.isQuiet(now, calendar: calendar) || sent >= CompanionNudge.maximumPerDay {
-            nextFire = now.addingTimeInterval(random(CompanionNudge.delayRange))
+            schedule(now.addingTimeInterval(random(kind.delayRange)), mood: kind, defaults: defaults)
             return false
         }
         guard ameIsIdle else { return false }
         defaults.set(today, forKey: Self.dayKey)
         defaults.set(sent + 1, forKey: Self.countKey)
-        nextFire = now.addingTimeInterval(random(CompanionNudge.delayRange))
+        schedule(now.addingTimeInterval(random(kind.delayRange)), mood: kind, defaults: defaults)
         return true
     }
 }
@@ -1911,5 +2069,83 @@ actor CompanionStateWriter {
         let manager = FileManager.default
         try? manager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
+    }
+}
+
+// MARK: Text emoticons and Ame's mood
+
+/// Emoji do not render in the pixel font: they become text emoticons, or go.
+enum CompanionText {
+    private static let replacements: [UInt32: String] = {
+        var table: [UInt32: String] = [:]
+        for value: UInt32 in [0x2764, 0x1F495, 0x1F496, 0x1F497, 0x1F493, 0x2665] { table[value] = "<3" }
+        for value: UInt32 in [0x1F60A, 0x1F604, 0x1F601, 0x1F970, 0x1F60D, 0x263A] { table[value] = "^^" }
+        for value: UInt32 in [0x1F62D, 0x1F622, 0x1F979, 0x1F63F] { table[value] = "(;_;)" }
+        for value: UInt32 in [0x1F620, 0x1F621] { table[value] = ">:(" }
+        table[0x1F633] = "(//_//)"
+        table[0x1F44B] = "~"
+        table[0x2728] = "*"
+        table[0x1F389] = "\\(^o^)/"
+        return table
+    }()
+
+    /// Hearts, smiles, tears, anger, blushes, waves, sparkles and party poppers become emoticons;
+    /// every other emoji (with variation selectors, joiners and skin tones) is removed and doubled
+    /// spaces are closed up. Ordinary text, digits, `#`, `*` and kaomoji characters are left alone.
+    static func sanitized(_ text: String) -> String {
+        let scalars = Array(text.unicodeScalars)
+        var output = String.UnicodeScalarView()
+        var changed = false
+        var afterEmoji = false
+        var index = 0
+        while index < scalars.count {
+            let scalar = scalars[index]
+            let next = index + 1 < scalars.count ? scalars[index + 1] : nil
+            index += 1
+            if let replacement = replacements[scalar.value] {
+                output.append(contentsOf: replacement.unicodeScalars)
+                changed = true
+                afterEmoji = true
+                continue
+            }
+            switch scalar.value {
+            case 0xFE0F, 0x20E3:
+                changed = true
+                continue
+            case 0x200D:
+                if afterEmoji { changed = true } else { output.append(scalar) }
+                continue
+            default:
+                break
+            }
+            if scalar.value >= 0x80,
+               scalar.properties.isEmojiPresentation || (scalar.properties.isEmoji && next?.value == 0xFE0F) {
+                changed = true
+                afterEmoji = true
+                continue
+            }
+            afterEmoji = false
+            output.append(scalar)
+        }
+        guard changed else { return text }
+        var result = String(output)
+        while result.contains("  ") { result = result.replacingOccurrences(of: "  ", with: " ") }
+        return result.trimmingCharacters(in: CharacterSet(charactersIn: " "))
+    }
+}
+
+/// Ame's own words about how she feels override what the commander's status would show.
+enum CompanionMoodResolver {
+    /// How long her latest reply keeps the mood.
+    static let window: TimeInterval = 10 * 60
+
+    /// The mood key to show: her tagged (or worded) mood while her reply is at most ten minutes old
+    /// and is one of the known moods; else the commander-driven key. The user's own love reaction
+    /// always comes first.
+    static func effective(commanderKey: String, ameMood: String?, age: TimeInterval?,
+                          loveReaction: Bool) -> String {
+        guard !loveReaction, let mood = ameMood?.lowercased(), CompanionMessage.validMoods.contains(mood),
+              let age, age <= window else { return commanderKey }
+        return mood
     }
 }

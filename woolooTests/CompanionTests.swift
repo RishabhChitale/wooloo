@@ -784,7 +784,7 @@ final class CompanionTests: XCTestCase {
     func testNudgeTextAndHints() {
         // 2026-11-03 is a Tuesday.
         XCTAssertEqual(CompanionNudge.text(now: date(15, 5), hint: "everything is quiet", calendar: utc),
-                       "[nudge] it's Tuesday 3:05 PM; everything is quiet")
+                       "[nudge] it's Tuesday 3:05 PM; mood: calm; doing: just hanging out; everything is quiet")
         XCTAssertEqual(CompanionNudge.hint(commanderWorking: true, runningTasks: 0), "the commander is working")
         XCTAssertEqual(CompanionNudge.hint(commanderWorking: false, runningTasks: 0), "everything is quiet")
         XCTAssertEqual(CompanionNudge.hint(commanderWorking: true, runningTasks: 3), "3 tasks running")
@@ -825,7 +825,7 @@ final class CompanionTests: XCTestCase {
         XCTAssertFalse(scheduler.due(now: date(3), ameIsIdle: true, calendar: utc, defaults: defaults, random: delay),
                        "03:00 is quiet")
         XCTAssertEqual(defaults.integer(forKey: CompanionNudgeScheduler.countKey), 0)
-        XCTAssertEqual(scheduler.nextFire, date(3).addingTimeInterval(150 * 60), "moved on instead")
+        XCTAssertEqual(scheduler.nextFire, date(3).addingTimeInterval(120 * 60), "moved on instead")
 
         defaults.set(CompanionNudge.dayKey(date(12), calendar: utc), forKey: CompanionNudgeScheduler.dayKey)
         defaults.set(CompanionNudge.maximumPerDay, forKey: CompanionNudgeScheduler.countKey)
@@ -1252,5 +1252,138 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(Int((15.0 / 4.0).rounded(.up)), 4, "15 activities take four rows")
         XCTAssertEqual(CompanionSettingsLayout.maximumHeight(screenHeight: 2000), 560)
         XCTAssertEqual(CompanionSettingsLayout.maximumHeight(screenHeight: 600), 420)
+    }
+
+    // MARK: JINE batch: text emoticons, mood tag, mood override, style hiding, nudges
+
+    func testEmojiBecomeTextEmoticons() {
+        XCTAssertEqual(CompanionText.sanitized("love \u{2764}\u{FE0F} you \u{1F495}"), "love <3 you <3")
+        XCTAssertEqual(CompanionText.sanitized("yay \u{1F60A}\u{1F604}\u{263A}\u{FE0F}"), "yay ^^^^^^")
+        XCTAssertEqual(CompanionText.sanitized("oh no \u{1F62D}"), "oh no (;_;)")
+        XCTAssertEqual(CompanionText.sanitized("grr \u{1F620}"), "grr >:(")
+        XCTAssertEqual(CompanionText.sanitized("eep \u{1F633}"), "eep (//_//)")
+        XCTAssertEqual(CompanionText.sanitized("hi \u{1F44B}"), "hi ~")
+        XCTAssertEqual(CompanionText.sanitized("\u{2728}shiny\u{2728}"), "*shiny*")
+        XCTAssertEqual(CompanionText.sanitized("party \u{1F389}"), "party \\(^o^)/")
+    }
+
+    func testOtherEmojiAreRemovedWithTheirJoinersAndTones() {
+        XCTAssertEqual(CompanionText.sanitized("a \u{1F680} b"), "a b", "doubled spaces are closed")
+        XCTAssertEqual(CompanionText.sanitized("ok\u{1F44D}\u{1F3FD}"), "ok", "skin tone goes too")
+        XCTAssertEqual(CompanionText.sanitized("fam \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}!"), "fam !")
+        XCTAssertEqual(CompanionText.sanitized("flag \u{1F1E8}\u{1F1E6} end"), "flag end")
+        XCTAssertEqual(CompanionText.sanitized("sun \u{2600}\u{FE0F} out"), "sun out")
+        XCTAssertEqual(CompanionText.sanitized("1\u{FE0F}\u{20E3} first"), "1 first", "a keycap keeps its digit")
+    }
+
+    func testOrdinaryTextAndKaomojiAreUntouched() {
+        for text in ["plain text, 123 #hash *bold* _x_ :) <3 ^^ (;_;)", "(\u{2267}\u{25BD}\u{2266}) \u{00B4}\u{2200}`  \u{03C9}",
+                     "3 \u{00D7} 4 = 12 \u{2022} done", " leading and  doubled spaces stay ", "caf\u{00E9} na\u{00EF}ve"] {
+            XCTAssertEqual(CompanionText.sanitized(text), text)
+        }
+        XCTAssertEqual(CompanionText.sanitized("\u{2764} 5 #3 \u{1F600}"), "<3 5 #3")
+    }
+
+    func testMoodTagIsStrippedAndExposed() {
+        let tagged = CompanionMessage(role: .assistant, text: "I missed you \u{1F495} [Mood: LOVE]  \n", time: nil)
+        XCTAssertEqual(tagged.mood, "love")
+        XCTAssertEqual(tagged.displayText, "I missed you <3")
+        XCTAssertEqual(CompanionMessage(role: .assistant, text: "ok [mood: sad]", time: nil).mood, "sad")
+        let unknown = CompanionMessage(role: .assistant, text: "hi [mood: giddy]", time: nil)
+        XCTAssertNil(unknown.mood)
+        XCTAssertEqual(unknown.displayText, "hi [mood: giddy]", "an unknown tag is left as typed")
+        XCTAssertNil(CompanionMessage(role: .assistant, text: "[mood: sad] then more text", time: nil).mood,
+                     "only a trailing tag counts")
+        XCTAssertNil(CompanionMessage(role: .assistant, text: "plain", time: nil).mood)
+    }
+
+    func testAmeMoodOverridesForTenMinutesOnly() {
+        let key = CompanionMoodResolver.effective
+        XCTAssertEqual(key("working", "sad", 60, false), "sad", "her mood wins over the commander's")
+        XCTAssertEqual(key("done", "idle", 9 * 60, false), "idle")
+        XCTAssertEqual(key("working", "sad", 10 * 60 + 1, false), "working", "expired")
+        XCTAssertEqual(key("working", "giddy", 5, false), "working", "invalid tag ignored")
+        XCTAssertEqual(key("working", nil, nil, false), "working")
+        XCTAssertEqual(key("love", "sad", 5, true), "love", "the user's love reaction comes first")
+        XCTAssertEqual(key("working", "LOVE", 5, false), "love", "case does not matter")
+    }
+
+    func testStyleTurnsAndTheirShortAcknowledgementAreHidden() {
+        let t = date(12)
+        let messages = [
+            CompanionMessage(role: .user, text: "[style] from now on: text emoticons only", time: t),
+            CompanionMessage(role: .assistant, text: "<3 [mood: love]", time: t),
+            CompanionMessage(role: .assistant, text: "hello there", time: t),
+            CompanionMessage(role: .user, text: "  [STYLE] again", time: t),
+            CompanionMessage(role: .assistant, text: String(repeating: "x", count: 41), time: t),
+            CompanionMessage(role: .user, text: "style tips please", time: t),
+            CompanionMessage(role: .assistant, text: "sure!", time: t),
+            CompanionMessage(role: .user, text: "[nudge] it's Monday", time: t),
+            CompanionMessage(role: .assistant, text: "hi!", time: t),
+        ]
+        XCTAssertEqual(CompanionNudge.visible(messages).map(\.text),
+                       ["hello there", String(repeating: "x", count: 41), "style tips please", "sure!", "hi!"])
+    }
+
+    func testAmeIsAvailableUnlessWorkingOrBlocked() {
+        for status in ["idle", "done", "unknown", nil] { XCTAssertTrue(CompanionNudge.isAvailable(status: status), "\(status ?? "nil")") }
+        for status in ["working", "blocked", "Working"] { XCTAssertFalse(CompanionNudge.isAvailable(status: status), status) }
+    }
+
+    func testNudgeDelaysDependOnTheMood() {
+        func range(_ key: String) -> [Double] {
+            let r = CompanionNudgeMood(key: key).delayRange
+            return [r.lowerBound / 60, r.upperBound / 60]
+        }
+        XCTAssertEqual(range("waiting"), [20, 50])
+        XCTAssertEqual(range("love"), [30, 70])
+        XCTAssertEqual(range("done"), [40, 90])
+        XCTAssertEqual(range("idle"), [45, 120])
+        for key in ["sad", "crying", "scared", "stressed", "angry"] { XCTAssertEqual(range(key), [25, 60], key) }
+        XCTAssertEqual(range("working"), [60, 150])
+        XCTAssertEqual(range("game"), [45, 120], "an unknown key counts as calm")
+    }
+
+    func testNudgeTextNamesTheMoodAndWhatSheIsDoing() {
+        XCTAssertEqual(CompanionNudge.text(now: date(14, 40), mood: "waiting", doing: "reading comics",
+                                           hint: "the commander is working", calendar: utc),
+                       "[nudge] it's Tuesday 2:40 PM; mood: lonely; doing: reading comics; the commander is working")
+        XCTAssertEqual(CompanionNudge.moodWord("crying"), "very sad")
+        XCTAssertEqual(CompanionNudge.moodWord("working"), "busy")
+        XCTAssertEqual(CompanionNudge.doingPhrase(forAmbientKey: "tv"), "watching TV")
+        XCTAssertNil(CompanionNudge.doingPhrase(forAmbientKey: "drag"))
+    }
+
+    func testNextNudgeSurvivesARelaunchAndNeverFiresAtOnce() throws {
+        let (defaults, cleanup) = try isolatedDefaults()
+        defer { cleanup() }
+        let low: (ClosedRange<TimeInterval>) -> TimeInterval = { $0.lowerBound }
+        var first = CompanionNudgeScheduler()
+        XCTAssertFalse(first.due(now: date(10), ameIsIdle: true, calendar: utc, defaults: defaults, random: low))
+        let saved = defaults.double(forKey: CompanionNudgeScheduler.nextKey)
+        XCTAssertEqual(saved, date(10).addingTimeInterval(45 * 60).timeIntervalSince1970)
+        // Relaunch before it is due: the saved time is kept.
+        var second = CompanionNudgeScheduler()
+        XCTAssertFalse(second.due(now: date(10, 20), ameIsIdle: true, calendar: utc, defaults: defaults, random: low))
+        XCTAssertEqual(second.nextFire, date(10).addingTimeInterval(45 * 60))
+        // Relaunch after it passed: no sooner than ten minutes after launch.
+        var third = CompanionNudgeScheduler()
+        XCTAssertFalse(third.due(now: date(13), ameIsIdle: true, calendar: utc, defaults: defaults, random: low))
+        XCTAssertEqual(third.nextFire, date(13, 10))
+        XCTAssertFalse(third.due(now: date(13, 9), ameIsIdle: true, calendar: utc, defaults: defaults, random: low))
+        XCTAssertTrue(third.due(now: date(13, 11), ameIsIdle: true, calendar: utc, defaults: defaults, random: low))
+    }
+
+    func testTheWaitIsDrawnAgainOnceWhenTheMoodKindChanges() throws {
+        let (defaults, cleanup) = try isolatedDefaults()
+        defer { cleanup() }
+        let high: (ClosedRange<TimeInterval>) -> TimeInterval = { $0.upperBound }
+        var scheduler = CompanionNudgeScheduler()
+        _ = scheduler.due(now: date(10), ameIsIdle: true, mood: "working", calendar: utc, defaults: defaults, random: high)
+        XCTAssertEqual(scheduler.nextFire, date(10).addingTimeInterval(150 * 60), "busy: 60-150 minutes")
+        _ = scheduler.due(now: date(10, 5), ameIsIdle: true, mood: "waiting", calendar: utc, defaults: defaults, random: high)
+        XCTAssertEqual(scheduler.nextFire, date(10, 5).addingTimeInterval(50 * 60), "lonely: drawn again")
+        _ = scheduler.due(now: date(10, 6), ameIsIdle: true, mood: "sad", calendar: utc, defaults: defaults, random: high)
+        XCTAssertEqual(scheduler.nextFire, date(10, 5).addingTimeInterval(50 * 60), "only once per wait")
     }
 }
