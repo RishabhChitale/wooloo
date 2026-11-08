@@ -527,7 +527,8 @@ struct CompanionPanel: View {
             VStack(spacing: 0) {
                 // Her room and the chat take their natural height; the sections below make room.
                 VStack(spacing: 6) {
-                    CompanionView(model: model, commander: commander, ame: ame, store: store, width: width - 14)
+                    CompanionView(model: model, commander: commander, ame: ame, store: store,
+                                  registeredSessionIDs: Set(agents.compactMap(\.agentSessionID)), width: width - 14)
                     CompanionJineBox(model: model, ame: ame, store: store)
                 }
                 .padding(7)

@@ -1017,4 +1017,97 @@ final class CompanionTests: XCTestCase {
         defaults.set(false, forKey: CompanionPreferences.transitionsKey)
         XCTAssertFalse(CompanionPreferences.playsTransitions(defaults: defaults))
     }
+
+    // MARK: Background job transcripts and the mood file
+
+    private let now0 = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func file(_ id: String, minutesAgo: Double, cwd: String? = "/work") -> CompanionSessionFile {
+        CompanionSessionFile(id: id, modified: now0.addingTimeInterval(-minutesAgo * 60), cwd: cwd)
+    }
+
+    private func choose(_ listing: [CompanionSessionFile], registeredAgo: Double = 120, registeredIDs: Set<String> = ["reg"],
+                        cwd: String? = "/work", previous: String? = nil) -> String {
+        CompanionSessionChoice.choose(registeredID: "reg", registeredModified: now0.addingTimeInterval(-registeredAgo * 60),
+                                      listing: listing, registeredIDs: registeredIDs, now: now0,
+                                      commanderCwd: cwd, previous: previous)
+    }
+
+    func testSessionChoicePicksANewerUnregisteredFile() {
+        XCTAssertEqual(choose([file("job", minutesAgo: 1)]), "job")
+        XCTAssertEqual(choose([file("old", minutesAgo: 5), file("job", minutesAgo: 1)]), "job", "the newest wins")
+        XCTAssertEqual(choose([]), "reg")
+    }
+
+    func testSessionChoiceNeverTakesARegisteredSession() {
+        XCTAssertEqual(choose([file("pawn", minutesAgo: 1)], registeredIDs: ["reg", "pawn"]), "reg")
+        XCTAssertEqual(choose([file("pawn", minutesAgo: 1), file("job", minutesAgo: 3)], registeredIDs: ["reg", "pawn"]), "job")
+    }
+
+    func testSessionChoiceIgnoresStaleAndOlderFiles() {
+        XCTAssertEqual(choose([file("stale", minutesAgo: 11)]), "reg", "quiet for over 10 minutes")
+        XCTAssertEqual(choose([file("older", minutesAgo: 30)], registeredAgo: 20), "reg", "older than the registered file")
+        XCTAssertEqual(choose([file("job", minutesAgo: 9.9)]), "job")
+    }
+
+    func testSessionChoiceChecksTheWorkingDirectory() {
+        XCTAssertEqual(choose([file("elsewhere", minutesAgo: 1, cwd: "/other")]), "reg")
+        XCTAssertEqual(choose([file("nocwd", minutesAgo: 1, cwd: nil)]), "reg")
+        XCTAssertEqual(choose([file("job", minutesAgo: 1, cwd: "/work/")]), "job", "a trailing slash does not matter")
+        XCTAssertEqual(choose([file("anywhere", minutesAgo: 1, cwd: "/other")], cwd: nil), "anywhere",
+                       "no pane directory known: not required")
+    }
+
+    func testSessionChoiceKeepsTheOrphanInUseAndFallsBack() {
+        // B is a little newer than A: no flip-flop. Much newer: switch.
+        XCTAssertEqual(choose([file("a", minutesAgo: 2), file("b", minutesAgo: 1.7)], previous: "a"), "a")
+        XCTAssertEqual(choose([file("a", minutesAgo: 5), file("b", minutesAgo: 1)], previous: "a"), "b")
+        // The orphan went quiet for 10 minutes: back to the registered session.
+        XCTAssertEqual(choose([file("a", minutesAgo: 10.5)], previous: "a"), "reg")
+        // The orphan became registered: never kept.
+        XCTAssertEqual(choose([file("a", minutesAgo: 1)], registeredIDs: ["reg", "a"], previous: "a"), "reg")
+    }
+
+    func testReaderFollowsAnUnregisteredNewerFileInTheSameFolder() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("wooloo-sess-\(UUID())")
+        let folder = root.appendingPathComponent("proj")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date()
+        func write(_ id: String, cwd: String, age: TimeInterval) throws {
+            let url = folder.appendingPathComponent("\(id).jsonl")
+            try "{\"cwd\":\"\(cwd)\",\"type\":\"user\"}\n".write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-age)], ofItemAtPath: url.path)
+        }
+        try write("reg-1", cwd: "/work", age: 3600)
+        try write("job-1", cwd: "/work", age: 30)
+        try write("pawn-1", cwd: "/work", age: 10)
+        try write("far-1", cwd: "/other", age: 5)
+        let reader = CompanionTranscriptReader(projects: root)
+        let chosen = await reader.effectiveSessionID(registered: "reg-1", registeredIDs: ["reg-1", "pawn-1"],
+                                                     commanderCwd: "/work", now: now)
+        XCTAssertEqual(chosen, "job-1")
+        let alone = await CompanionTranscriptReader(projects: root).effectiveSessionID(
+            registered: "reg-1", registeredIDs: ["reg-1", "pawn-1", "job-1", "far-1"], commanderCwd: "/work", now: now)
+        XCTAssertEqual(alone, "reg-1")
+    }
+
+    func testMoodFilePayloadHasOnlyMoodSkinAndTime() throws {
+        let data = CompanionMoodState.payload(mood: "game", skin: "streamer", time: Date(timeIntervalSince1970: 1_800_000_000))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), ["mood", "skin", "t"])
+        XCTAssertEqual(object["mood"] as? String, "game")
+        XCTAssertEqual(object["skin"] as? String, "streamer")
+        XCTAssertEqual(object["t"] as? Int, 1_800_000_000)
+        XCTAssertEqual(CompanionMoodState.fileURL(companionDirectory: URL(fileURLWithPath: "/h/wooloo-companion/ame")).path,
+                       "/h/wooloo-companion/state/mood.json")
+    }
+
+    func testMoodFileIsWrittenOnChangeAndEveryThirtySeconds() {
+        let t = Date(timeIntervalSince1970: 1000)
+        XCTAssertTrue(CompanionMoodState.isDue(key: "idle", lastKey: nil, lastWrite: nil, now: t))
+        XCTAssertFalse(CompanionMoodState.isDue(key: "idle", lastKey: "idle", lastWrite: t, now: t.addingTimeInterval(29)))
+        XCTAssertTrue(CompanionMoodState.isDue(key: "idle", lastKey: "idle", lastWrite: t, now: t.addingTimeInterval(30)))
+        XCTAssertTrue(CompanionMoodState.isDue(key: "working", lastKey: "idle", lastWrite: t, now: t.addingTimeInterval(1)))
+    }
 }

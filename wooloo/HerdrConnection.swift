@@ -148,6 +148,8 @@ struct HerdrAgent: Decodable, Equatable, Identifiable, Sendable {
     var stateChangeSeq: UInt64 = 0
     /// The agent's own session id (Herdr's `agent_session` of kind "id"), for example Claude Code's.
     var agentSessionID: String?
+    /// The agent pane's working directory, when Herdr reports it.
+    var cwd: String?
 
     var id: String { paneID }
     var displayName: String { displayAgent ?? name ?? agent ?? title ?? paneID }
@@ -166,7 +168,7 @@ struct HerdrAgent: Decodable, Equatable, Identifiable, Sendable {
         case paneID = "pane_id"
         case workspaceID = "workspace_id"
         case tabID = "tab_id"
-        case agent, name, title, tokens
+        case agent, name, title, tokens, cwd
         case terminalTitleStripped = "terminal_title_stripped"
         case displayAgent = "display_agent"
         case agentStatus = "agent_status"
@@ -193,6 +195,7 @@ extension HerdrAgent {
         tokens = try values.decodeIfPresent(AgentMetadata.self, forKey: .tokens)?.values
         stateChangeSeq = try values.decodeIfPresent(UInt64.self, forKey: .stateChangeSeq) ?? 0
         agentSessionID = (try? values.decodeIfPresent(AgentSession.self, forKey: .agentSession))?.id
+        cwd = try? values.decodeIfPresent(String.self, forKey: .cwd)
     }
 
     private struct AgentSession: Decodable {

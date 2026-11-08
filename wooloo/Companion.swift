@@ -750,6 +750,79 @@ actor CompanionTranscriptReader {
         return entry.snapshot
     }
 
+    private var listings: [URL: (checked: Date, files: [(id: String, modified: Date)])] = [:]
+    private var cwds: [String: String?] = [:]
+    private var orphanInUse: [String: String] = [:]
+    static let listingInterval: TimeInterval = 3
+
+    /// The session to read for an agent whose registered session is `registered`: that one, or an
+    /// unregistered newer file of the same folder (see `CompanionSessionChoice`). The folder is
+    /// listed at most every 3 s; only file dates and the first lines of recent candidates are read.
+    func effectiveSessionID(registered: String, registeredIDs: Set<String>, commanderCwd: String?,
+                            now: Date = Date()) -> String {
+        guard Self.isSessionID(registered) else { return registered }
+        var entry = entries[registered] ?? Entry()
+        if entry.url == nil { entry.url = locate(registered) }
+        entries[registered] = entry
+        guard let url = entry.url else { return registered }
+        let folder = url.deletingLastPathComponent()
+        let files = listing(of: folder, now: now)
+        let registeredModified = files.first { $0.id == registered }?.modified
+        let recent = files.filter { file in
+            file.id != registered && !registeredIDs.contains(file.id)
+                && file.modified > (registeredModified ?? .distantPast)
+                && now.timeIntervalSince(file.modified) <= CompanionSessionChoice.freshness
+        }
+        let candidates = recent.map {
+            CompanionSessionFile(id: $0.id, modified: $0.modified,
+                                 cwd: commanderCwd == nil ? nil : cwd(ofSession: $0.id, in: folder))
+        }
+        let choice = CompanionSessionChoice.choose(
+            registeredID: registered, registeredModified: registeredModified, listing: candidates,
+            registeredIDs: registeredIDs, now: now, commanderCwd: commanderCwd, previous: orphanInUse[registered])
+        orphanInUse[registered] = choice == registered ? nil : choice
+        return choice
+    }
+
+    private func listing(of folder: URL, now: Date) -> [(id: String, modified: Date)] {
+        if let cached = listings[folder], now.timeIntervalSince(cached.checked) < Self.listingInterval {
+            return cached.files
+        }
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles])) ?? []
+        let files = urls.compactMap { url -> (id: String, modified: Date)? in
+            guard url.pathExtension == "jsonl" else { return nil }
+            let id = url.deletingPathExtension().lastPathComponent
+            guard Self.isSessionID(id),
+                  let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            else { return nil }
+            return (id, modified)
+        }
+        listings[folder] = (now, files)
+        return files
+    }
+
+    /// The working directory in the first lines of a transcript; nothing else is kept.
+    private func cwd(ofSession id: String, in folder: URL) -> String? {
+        if let known = cwds[id] { return known }
+        var found: String?
+        if let handle = try? FileHandle(forReadingFrom: folder.appendingPathComponent("\(id).jsonl")) {
+            defer { try? handle.close() }
+            if let head = try? handle.read(upToCount: 16 * 1024) {
+                for line in head.split(separator: 0x0A).prefix(20) {
+                    if let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                       let value = object["cwd"] as? String {
+                        found = value
+                        break
+                    }
+                }
+            }
+        }
+        cwds[id] = .some(found)
+        return found
+    }
+
     private func locate(_ sessionID: String) -> URL? {
         guard let folders = try? FileManager.default.contentsOfDirectory(
             at: projects, includingPropertiesForKeys: nil) else { return nil }
@@ -878,6 +951,23 @@ final class CompanionModel: ObservableObject {
                         lineKey: lineKey) { player = next }
         if let sequence = next.sequence { ensureLoaded(sequence) }
         if let path = manifest.backgroundPath(at: now) { ensureImage(path) }
+        publishMood(key, skin: skin ?? CompanionManifest.defaultSkin, now: now)
+    }
+
+    private var publishedKey: String?
+    private var publishedAt: Date?
+    private let stateWriter = CompanionStateWriter()
+
+    /// Writes `state/mood.json` when the mood in play changes and every 30 s otherwise. Only the
+    /// mood key, the skin and the time are in it.
+    private func publishMood(_ key: String, skin: String, now: Date) {
+        guard CompanionMoodState.isDue(key: key, lastKey: publishedKey, lastWrite: publishedAt, now: now) else { return }
+        publishedKey = key
+        publishedAt = now
+        let data = CompanionMoodState.payload(mood: key, skin: skin, time: now)
+        let url = CompanionMoodState.fileURL(companionDirectory: directory)
+        let writer = stateWriter
+        Task.detached(priority: .utility) { await writer.write(data, to: url) }
     }
 
     /// The commander's words for the current mood, from its newest reply.
@@ -886,7 +976,8 @@ final class CompanionModel: ObservableObject {
     }
 
     /// Re-reads the commander's transcript, off the main thread and at most every 1.5 s.
-    func refreshDialogue(sessionID: String?, now: Date = Date()) {
+    func refreshDialogue(sessionID: String?, registeredIDs: Set<String> = [], cwd: String? = nil,
+                         now: Date = Date()) {
         if sessionID != dialogueSession {
             dialogueSession = sessionID
             dialogueRequested = .distantPast
@@ -901,7 +992,10 @@ final class CompanionModel: ObservableObject {
         dialogueInFlight = true
         let reader = reader
         Task {
-            let snapshot = await reader.snapshot(sessionID: sessionID)
+            // A background job writes a session Herdr never registered; follow it when it is newer.
+            let effective = await reader.effectiveSessionID(registered: sessionID, registeredIDs: registeredIDs,
+                                                            commanderCwd: cwd)
+            let snapshot = await reader.snapshot(sessionID: effective)
             self.dialogueInFlight = false
             guard self.dialogueSession == sessionID else { return }
             let next = snapshot.text.map { CompanionDialogue.sentences(fromMarkdown: $0) } ?? []
@@ -1148,6 +1242,8 @@ struct CompanionView: View {
     /// The "ame" agent whose side chat the JINE box shows; the room itself keeps the commander.
     var ame: HerdrAgent?
     var store: HerdrStore?
+    /// The session ids Herdr has registered for any agent, so none of them is taken for a background job.
+    var registeredSessionIDs: Set<String> = []
     /// The sidebar's width; the room is 1.0 times as tall by default.
     let width: CGFloat
     @AppStorage(CompanionPreferences.activityKey) private var activityID = CompanionPreferences.defaultActivity
@@ -1195,7 +1291,8 @@ struct CompanionView: View {
             .onChange(of: context.date) { _, date in
                 model.advance(now: date, mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus)
                 model.tickCutscene(now: date)
-                model.refreshDialogue(sessionID: commander?.agentSessionID, now: date)
+                model.refreshDialogue(sessionID: commander?.agentSessionID, registeredIDs: registeredSessionIDs,
+                                     cwd: commander?.cwd, now: date)
                 model.refreshAme(sessionID: ame?.agentSessionID, now: date)
                 if let store { model.tickNudge(now: date, ame: ame, commanderStatus: commander?.agentStatus, store: store) }
             }
@@ -1517,5 +1614,86 @@ struct CompanionUnread: Equatable {
         }
         guard let seen else { count = assistantTimes.count; return }
         count = assistantTimes.filter { $0 > seen }.count
+    }
+}
+
+// MARK: Which transcript the commander is really writing
+
+/// A transcript file next to the registered one: its session id, last write and working directory.
+struct CompanionSessionFile: Equatable, Sendable {
+    let id: String
+    let modified: Date
+    let cwd: String?
+}
+
+/// Claude Code background jobs write a session file that Herdr never registered. When the
+/// registered file has gone quiet and another file of the same project folder is newer, that is
+/// the transcript to read.
+enum CompanionSessionChoice {
+    /// How recent an unregistered file must be, and how long it may stay quiet before the
+    /// registered one is used again.
+    static let freshness: TimeInterval = 10 * 60
+    /// A second candidate has to be this much newer before it replaces the one in use.
+    static let switchMargin: TimeInterval = 30
+
+    /// The session id to read. `listing` is the other `.jsonl` files of the registered file's
+    /// folder; `registeredIDs` are the sessions of every agent Herdr knows; `previous` is the
+    /// orphan chosen last time, if any.
+    static func choose(registeredID: String, registeredModified: Date?, listing: [CompanionSessionFile],
+                       registeredIDs: Set<String>, now: Date, commanderCwd: String?,
+                       previous: String?) -> String {
+        let candidates = listing.filter { file in
+            file.id != registeredID
+                && !registeredIDs.contains(file.id)
+                && file.modified > (registeredModified ?? .distantPast)
+                && now.timeIntervalSince(file.modified) <= freshness
+                && (commanderCwd.map { same($0, file.cwd) } ?? true)
+        }
+        guard let newest = candidates.max(by: { $0.modified < $1.modified }) else { return registeredID }
+        if let previous, let kept = candidates.first(where: { $0.id == previous }),
+           newest.modified.timeIntervalSince(kept.modified) <= switchMargin {
+            return kept.id
+        }
+        return newest.id
+    }
+
+    /// Paths equal apart from a trailing slash; a file without a cwd never matches.
+    static func same(_ path: String, _ other: String?) -> Bool {
+        guard let other else { return false }
+        func trimmed(_ value: String) -> String {
+            value.count > 1 && value.hasSuffix("/") ? String(value.dropLast()) : value
+        }
+        return trimmed(path) == trimmed(other)
+    }
+}
+
+/// What the strip reads from `state/mood.json`: only the mood key, the skin and the time.
+enum CompanionMoodState {
+    static let heartbeat: TimeInterval = 30
+
+    static func payload(mood: String, skin: String, time: Date) -> Data {
+        let object: [String: Any] = ["mood": mood, "skin": skin, "t": Int(time.timeIntervalSince1970)]
+        return (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
+
+    /// Next to the `ame` folder: `…/wooloo-companion/state/mood.json`.
+    static func fileURL(companionDirectory: URL) -> URL {
+        companionDirectory.deletingLastPathComponent()
+            .appendingPathComponent("state", isDirectory: true).appendingPathComponent("mood.json")
+    }
+
+    /// Whether the file is due: the mood key changed, or the heartbeat has run out.
+    static func isDue(key: String, lastKey: String?, lastWrite: Date?, now: Date) -> Bool {
+        guard key == lastKey, let lastWrite else { return true }
+        return now.timeIntervalSince(lastWrite) >= heartbeat
+    }
+}
+
+/// Writes the mood file one at a time, off the main thread; best effort.
+actor CompanionStateWriter {
+    func write(_ data: Data, to url: URL) {
+        let manager = FileManager.default
+        try? manager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
     }
 }
