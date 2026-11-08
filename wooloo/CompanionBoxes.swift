@@ -226,6 +226,7 @@ struct CompanionWebcamSettings: View {
                             .help(choice.label)
                         }
                     }
+                    CompanionActivityPicker(model: model)
                     sliderRow("Size", value: $heightFactor, range: CompanionPreferences.heightFactorRange)
                     sliderRow("Zoom", value: $zoom, range: CompanionPreferences.zoomRange)
                 }
@@ -248,17 +249,19 @@ extension CompanionWebcamSettings {
     }
 }
 
-/// Icons of what she does in her free time. The commander's work comes first: the chosen
+/// Icons of what she does in her free time, in the Webcam Settings. The commander's work comes first: the chosen
 /// activity plays only while the commander is idle or done.
-struct CompanionActivitiesBox: View {
+struct CompanionActivityPicker: View {
     @ObservedObject var model: CompanionModel
-    @AppStorage(CompanionPreferences.activitiesCollapsedKey) private var collapsed = false
     @AppStorage(CompanionPreferences.activityKey) private var selected = CompanionPreferences.defaultActivity
     @Environment(\.woolooTypography) private var typography
 
     var body: some View {
         if let activities = model.manifest?.activities, !activities.isEmpty {
-            CompanionBox(title: "Activities", fontName: model.fontName, collapsed: $collapsed) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Activities")
+                    .font(CompanionFont.font(model.fontName, size: typography.secondary))
+                    .foregroundStyle(CompanionPalette.indigo)
                 HStack(alignment: .top, spacing: 2) {
                     ForEach(activities) { activity in
                         let available = activity.mood != nil
@@ -489,7 +492,6 @@ struct CompanionPanel: View {
                 ScrollView {
                     VStack(spacing: 6) {
                         CompanionView(model: model, commander: commander, ame: ame, store: store, width: width - 14)
-                        CompanionActivitiesBox(model: model)
                         CompanionJineBox(model: model, ame: ame, store: store)
                     }
                     .padding(7)
