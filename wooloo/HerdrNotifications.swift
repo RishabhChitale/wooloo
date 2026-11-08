@@ -127,7 +127,7 @@ final class HerdrNotifier: NSObject, ObservableObject, UNUserNotificationCenterD
     static let notifyAmeKey = "notifyAmeReplies"
 
     /// Alerts of the agent named "ame" are skipped unless the user asked for them.
-    static func suppresses(agentName: String?, notifiesAme: Bool) -> Bool {
+    nonisolated static func suppresses(agentName: String?, notifiesAme: Bool) -> Bool {
         agentName?.lowercased() == "ame" && !notifiesAme
     }
     private var showsDockBadge: Bool { UserDefaults.standard.object(forKey: Self.dockBadgeKey) as? Bool ?? true }
