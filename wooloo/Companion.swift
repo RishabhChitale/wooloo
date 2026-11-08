@@ -1138,6 +1138,16 @@ final class CompanionModel: ObservableObject {
     private var lastArguments: (mood: CompanionMood, activityID: String?, skin: String?, status: String?)?
     private var hearts: CompanionHeartsState?
     private var napPass: CompanionNap.Pass?
+    /// The cuddle scene in play, its frames all decoded; and the load that precedes it.
+    private var cuddleRun: CuddleRun?
+    private var cuddleLoadToken: UUID?
+
+    private struct CuddleRun {
+        let scene: CompanionCuddleScene
+        let out: [CGImage]
+        let hearts: [CGImage]
+        let startedAt: Date
+    }
     private var patLastSent: Date?
     /// The hearts level in whole steps of the bar, for the view.
     @Published private(set) var heartsFilled = 0
@@ -1199,6 +1209,8 @@ final class CompanionModel: ObservableObject {
             let old = currentSkin
             currentSkin = skin
             napPass = nil
+            cuddleRun = nil
+            cuddleLoadToken = nil
             loaded = [:]
             loadedFully = []
             loading = loading.filter { $0.hasPrefix("image:") }
@@ -1242,12 +1254,13 @@ final class CompanionModel: ObservableObject {
         }
         // The nap pass outranks every sequence while it plays; a skin change or cutscene cancels it.
         if let config = manifest.hearts { tickHearts(now: now, config: config); checkTestCuddle(config: config) }
-        if cutscene != nil { napPass = nil }
+        if cutscene != nil { napPass = nil; cuddleRun = nil; cuddleLoadToken = nil }
+        if let run = cuddleRun, now >= run.startedAt.addingTimeInterval(run.scene.duration) { cuddleRun = nil }
         if var pass = napPass {
             if pass.startedAt == nil { pass.startedAt = now }
             napPass = pass.isActive(now: now) ? pass : nil
         }
-        let napping = napPass != nil
+        let napping = napPass != nil || cuddleRun != nil
         var patBusy = false
         if let headpat = manifest.headpat, !napping {
             if let reached = patSession.overrideKey(now: now, ameMoodTime: ameMoodTime), let resolved = usableKey(reached) {
@@ -1352,6 +1365,42 @@ final class CompanionModel: ObservableObject {
     /// The level just rose to 100: one pass of the nap clip, starting at the next advance.
     private func startNap(config: CompanionHearts) {
         guard cutscene == nil, let manifest else { return }
+        if let scene = config.nap.cuddle, scene.skin == currentSkin {
+            // One scene at a time; its frames are all read before it starts.
+            guard cuddleRun == nil, cuddleLoadToken == nil else { return }
+            startCuddleScene(scene, config: config)
+            return
+        }
+        startSleepNap(config: config)
+    }
+
+    private func startCuddleScene(_ scene: CompanionCuddleScene, config: CompanionHearts) {
+        let token = UUID()
+        cuddleLoadToken = token
+        let root = directory
+        Task {
+            let frames = await Task.detached(priority: .userInitiated) { () -> ([CGImage], [CGImage]) in
+                func read(_ dir: String, _ count: Int) -> [CGImage] {
+                    let folder = root.appendingPathComponent(dir, isDirectory: true)
+                    return (0..<count).compactMap { Self.readFrame(folder.appendingPathComponent("\($0).png")) }
+                }
+                return (read(scene.out, scene.outFrames), read(scene.hearts, scene.heartFrames))
+            }.value
+            guard self.cuddleLoadToken == token else { return }
+            self.cuddleLoadToken = nil
+            guard frames.0.count == scene.outFrames, frames.1.count == scene.heartFrames else {
+                // Never a held or blank frame mid-scene: with any frame missing she naps instead.
+                self.startSleepNap(config: config)
+                return
+            }
+            self.cuddleRun = CuddleRun(scene: scene, out: frames.0, hearts: frames.1, startedAt: Date())
+            self.refresh()
+        }
+    }
+
+    /// The sleep clip once, with the hearts floating up from her head.
+    private func startSleepNap(config: CompanionHearts) {
+        guard cutscene == nil, let manifest else { return }
         let skin = manifest.skins.isEmpty ? nil : currentSkin
         guard let key = CompanionNap.key(config: config.nap, skinHas: { manifest.hasOwnSequences(forKey: $0, skin: skin) })
         else { return }
@@ -1371,19 +1420,17 @@ final class CompanionModel: ObservableObject {
         advance(now: now, mood: last.mood, activityID: last.activityID, skin: last.skin, status: last.status)
     }
 
-    /// One click on her head: sounds, the session and the mood steps, hearts.
+    /// One click on her head: the session and the mood steps, hearts.
     func pat(now: Date = Date()) {
         guard let manifest, let headpat = manifest.headpat else { return }
-        let count = patSession.pat(now: now, base: effectiveKey ?? "idle", reactions: headpat.reactions)
-        if CompanionPreferences.headpatSoundsEnabled() {
-            CompanionHeadpatSound.play(CompanionHeadpatSound.paths(count: count, sounds: headpat.sounds), in: directory)
-        }
+        patSession.pat(now: now, base: effectiveKey ?? "idle", reactions: headpat.reactions)
         addHearts(manifest.hearts?.gains.pat ?? 0, now: now)
         refresh(now: now)
     }
 
     /// The speech bubble that comes before the commander's words: the nap, else a headpat line.
     func patBubble(now: Date) -> String? {
+        if cuddleStep(at: now) != nil { return CompanionNap.sceneBubble }
         if napPass?.isActive(now: now) == true { return CompanionNap.bubble }
         return patSession.bubbleLine(now: now)
     }
@@ -1394,6 +1441,17 @@ final class CompanionModel: ObservableObject {
         return (now.timeIntervalSince(started), pass.sequence.duration)
     }
 
+    /// The scene's phase and frame images at `now`; nil when no scene plays.
+    func cuddleStep(at now: Date) -> (step: CompanionCuddleScene.Step, image: CGImage)? {
+        guard let run = cuddleRun, let step = run.scene.step(at: now.timeIntervalSince(run.startedAt)) else { return nil }
+        let frames = step.phase == .empty ? run.hearts : run.out
+        guard frames.indices.contains(step.frame) else { return nil }
+        return (step, frames[step.frame])
+    }
+
+    /// The frame rate the room must tick at for the scene; nil when none plays.
+    var cuddleFPS: Double? { cuddleRun?.scene.fps }
+
     private var testCuddleSeen: String??
 
     /// A new value of `companionTestCuddle` while running fires the pass once; nothing else changes.
@@ -1402,7 +1460,7 @@ final class CompanionModel: ObservableObject {
         guard let seen = testCuddleSeen else { testCuddleSeen = .some(current); return }
         guard CompanionNap.testTriggered(current: current, last: seen) else { return }
         testCuddleSeen = .some(current)
-        if napPass == nil { startNap(config: config) }
+        if napPass == nil { startNap(config: config) }  // a scene or load in progress ignores it
     }
 
     /// The hearts bar is shown when the manifest has hearts.
@@ -1411,7 +1469,7 @@ final class CompanionModel: ObservableObject {
 
     /// The head in the room's coordinates now; nil during a cutscene or without art.
     func headRect(area: CGSize, zoom: Double, now: Date) -> CGRect? {
-        guard cutscene == nil, let manifest, let headpat = manifest.headpat,
+        guard cutscene == nil, cuddleRun == nil, let manifest, let headpat = manifest.headpat,
               let head = headpat.head(forSkin: currentSkin ?? CompanionManifest.defaultSkin),
               let sprite = image(at: now) else { return nil }
         let background = backgroundImage(at: now).map { CGSize(width: $0.width, height: $0.height) }
@@ -1812,6 +1870,7 @@ struct CompanionView: View {
         let mood = CompanionMood(agentStatus: commander?.agentStatus)
         TimelineView(.animation(minimumInterval: 1 / max(model.player.sequence?.fps ?? 10,
                                                          model.cutscene?.transition.fps ?? 0,
+                                                         model.cuddleFPS ?? 0,
                                                          model.cuddle(at: Date()) == nil ? 0 : 1 / CompanionCuddle.tick))) { context in
             VStack(spacing: 6) {
                 room(at: context.date)
@@ -1917,6 +1976,16 @@ extension CompanionView {
                 CompanionScene(background: model.backgroundImage(at: date),
                                spriteRect: model.manifest?.spriteRect, sprite: nil, zoom: 1)
             }
+        } else if let scene = model.cuddleStep(at: date) {
+            // Her walk out and back are her frames under the steady camera; in between the room
+            // is empty (same background and zoom) with the hearts art over it, outside the camera.
+            CompanionScene(background: model.backgroundImage(at: date),
+                           spriteRect: model.manifest?.spriteRect,
+                           sprite: scene.image,
+                           spriteVisible: model.camera(),
+                           zoom: CompanionPreferences.clampedZoom(zoom),
+                           showsSprite: scene.step.phase != .empty)
+                .overlay { if scene.step.phase == .empty { CompanionCuddleHearts(image: scene.image) } }
         } else {
             CompanionScene(background: model.backgroundImage(at: date),
                            spriteRect: model.manifest?.spriteRect,
@@ -1924,6 +1993,25 @@ extension CompanionView {
                            spriteVisible: model.camera(),
                            zoom: CompanionPreferences.clampedZoom(zoom))
         }
+    }
+}
+
+/// The hearts art of the cuddle scene: its canvas height is the room's height, the canvas is
+/// right-aligned to the room's right edge and clipped, nearest-neighbour; no camera, no zoom.
+struct CompanionCuddleHearts: View {
+    let image: CGImage
+
+    var body: some View {
+        GeometryReader { area in
+            let scale = image.height > 0 ? area.size.height / CGFloat(image.height) : 1
+            Image(decorative: image, scale: 1)
+                .interpolation(.none)
+                .resizable()
+                .frame(width: CGFloat(image.width) * scale, height: area.size.height)
+                .frame(width: area.size.width, height: area.size.height, alignment: .trailing)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .allowsHitTesting(false)
     }
 }
 
@@ -1956,6 +2044,8 @@ struct CompanionScene: View {
     var spriteVisible: CGRect?
     /// The whole scene is magnified by this much around her sprite's center.
     var zoom: Double = 1
+    /// False keeps the sprite's place in the zoom anchor but draws the room without her.
+    var showsSprite = true
 
     /// The unit point to zoom around: the center of what is visible of the sprite image, which
     /// is fitted into `spriteRect` (background pixels) or, with `spriteRect` nil, into the whole
@@ -2021,7 +2111,7 @@ struct CompanionScene: View {
                         .interpolation(.none)
                         .resizable()
                         .frame(width: size.width * scale, height: size.height * scale)
-                    if let sprite {
+                    if let sprite, showsSprite {
                         Image(decorative: sprite, scale: 1)
                             .interpolation(.none)
                             .resizable()
@@ -2036,7 +2126,7 @@ struct CompanionScene: View {
                 // height at the top, so the picture always reaches every edge of the room.
                 .frame(width: area.size.width, height: area.size.height, alignment: .bottom)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
-            } else if let sprite {
+            } else if let sprite, showsSprite {
                 let spriteAnchor = Self.zoomAnchor(
                     visible: spriteVisible, imageSize: CGSize(width: sprite.width, height: sprite.height),
                     area: area.size)
@@ -2627,24 +2717,6 @@ struct CompanionAmbientScheduler {
 /// The optional `headpat` part of the manifest. Decoding never fails: a part that is missing or
 /// malformed is simply empty, and without any head the feature is off.
 struct CompanionHeadpat: Decodable, Equatable, Sendable {
-    struct Sounds: Decodable, Equatable, Sendable {
-        var pat: String?
-        var third: String?
-
-        init(pat: String? = nil, third: String? = nil) {
-            self.pat = pat
-            self.third = third
-        }
-
-        private enum Keys: String, CodingKey { case pat, third }
-
-        init(from decoder: Decoder) {
-            let container = try? decoder.container(keyedBy: Keys.self)
-            pat = CompanionHeadpat.lossy(container, .pat, String.self).flatMap { CompanionBackground.isSafe($0) ? $0 : nil }
-            third = CompanionHeadpat.lossy(container, .third, String.self).flatMap { CompanionBackground.isSafe($0) ? $0 : nil }
-        }
-    }
-
     /// From this many pats on, the mood shows `key`.
     struct Step: Equatable, Sendable {
         var pats: Int
@@ -2689,23 +2761,20 @@ struct CompanionHeadpat: Decodable, Equatable, Sendable {
         }
     }
 
-    var sounds = Sounds()
     /// Each skin's head as x, y, width, height in the pixels of the sprite image.
     var heads: [String: [Double]] = [:]
     /// By the mood she is in when the pats start.
     var reactions: [String: Reaction] = [:]
 
-    init(sounds: Sounds = Sounds(), heads: [String: [Double]] = [:], reactions: [String: Reaction] = [:]) {
-        self.sounds = sounds
+    init(heads: [String: [Double]] = [:], reactions: [String: Reaction] = [:]) {
         self.heads = heads
         self.reactions = reactions
     }
 
-    private enum Keys: String, CodingKey { case sounds, heads, reactions }
+    private enum Keys: String, CodingKey { case heads, reactions }
 
     init(from decoder: Decoder) {
         let container = try? decoder.container(keyedBy: Keys.self)
-        sounds = Self.lossy(container, .sounds, Sounds.self) ?? Sounds()
         let rawHeads = Self.lossy(container, .heads, [String: [Double]].self) ?? [:]
         heads = rawHeads.filter { Self.isValidHead($0.value) }
         reactions = Self.lossy(container, .reactions, [String: Reaction].self) ?? [:]
@@ -2861,33 +2930,6 @@ enum CompanionPatMessage {
     }
 }
 
-/// Pat sounds: which ones a pat plays, and playing them.
-enum CompanionHeadpatSound {
-    /// Every third pat of a session also plays the "third" sound.
-    static func playsThird(count: Int) -> Bool { count > 0 && count % 3 == 0 }
-
-    static func paths(count: Int, sounds: CompanionHeadpat.Sounds) -> [String] {
-        var result: [String] = []
-        if let pat = sounds.pat { result.append(pat) }
-        if playsThird(count: count), let third = sounds.third { result.append(third) }
-        return result
-    }
-
-    @MainActor private static var playing: [NSSound] = []
-
-    @MainActor
-    static func play(_ paths: [String], in directory: URL) {
-        playing.removeAll { !$0.isPlaying }
-        for path in paths {
-            guard CompanionBackground.isSafe(path),
-                  let sound = NSSound(contentsOf: directory.appendingPathComponent(path), byReference: false)
-            else { continue }
-            playing.append(sound)
-            sound.play()
-        }
-    }
-}
-
 /// Where her head is in the room, and whether the pointer is on it.
 enum CompanionHeadpatHit {
     /// The settings button in the top-right corner (16 pt plus padding) and the resize strip along
@@ -2948,6 +2990,8 @@ struct CompanionHearts: Decodable, Equatable, Sendable {
     struct Nap: Equatable, Sendable {
         var key = "sleep"
         var fallback: String?
+        /// A scene of her own for one skin, played instead of the clip.
+        var cuddle: CompanionCuddleScene?
     }
 
     struct Gains: Equatable, Sendable {
@@ -2972,7 +3016,7 @@ struct CompanionHearts: Decodable, Equatable, Sendable {
     init() {}
 
     private enum Keys: String, CodingKey { case icon, nap, gains, losses, decayPerHour }
-    private enum NapKeys: String, CodingKey { case key, fallback }
+    private enum NapKeys: String, CodingKey { case key, fallback, cuddle }
     private enum GainKeys: String, CodingKey { case pat, jineLove, jineHappy, userLove }
     private enum LossKeys: String, CodingKey { case jineSad, jineAngry }
 
@@ -2991,6 +3035,7 @@ struct CompanionHearts: Decodable, Equatable, Sendable {
         if let nap = try? container.nestedContainer(keyedBy: NapKeys.self, forKey: .nap) {
             if let key = CompanionHeadpat.lossy(nap, .key, String.self), !key.isEmpty { self.nap.key = key }
             self.nap.fallback = CompanionHeadpat.lossy(nap, .fallback, String.self)
+            self.nap.cuddle = CompanionHeadpat.lossy(nap, .cuddle, CompanionCuddleScene.self).flatMap { $0.isValid ? $0 : nil }
         }
         if let gains = try? container.nestedContainer(keyedBy: GainKeys.self, forKey: .gains) {
             self.gains.pat = Self.number(gains, .pat, 4, 0...100)
@@ -3111,6 +3156,8 @@ struct CompanionHeartsState: Equatable {
 /// The nap: when the level reaches 100 she plays one clip once, then goes back to her mood.
 enum CompanionNap {
     static let bubble = "zzz... ♡"
+    /// The bubble during the cuddle scene.
+    static let sceneBubble = "♡"
 
     /// `nap.key` if the skin has its own, else the fallback; nil when neither exists.
     static func key(config: CompanionHearts.Nap, skinHas: (String) -> Bool) -> String? {
@@ -3153,6 +3200,46 @@ enum CompanionNap {
         guard !sequences.isEmpty else { return nil }
         return Pass(key: key, sequence: oneShot(sequences[min(max(0, pick(sequences.count)), sequences.count - 1)]),
                     startedAt: nil)
+    }
+}
+
+/// The cuddle scene of one skin: she walks out of the room, the empty room fills with hearts, she
+/// walks back. Three phases at `fps`, back to back with instant cuts; the walk back is the walk out
+/// in reverse.
+struct CompanionCuddleScene: Decodable, Equatable, Sendable {
+    var skin: String
+    var out: String
+    var outFrames: Int
+    var hearts: String
+    var heartFrames: Int
+    var fps: Double
+    var heartLoops: Int
+
+    enum Phase: Equatable, Sendable { case out, empty, back }
+
+    struct Step: Equatable, Sendable {
+        var phase: Phase
+        /// The file number to show: of the `out` folder for `.out` and `.back`, of `hearts` for `.empty`.
+        var frame: Int
+    }
+
+    var isValid: Bool {
+        let safe = { (dir: String) in !dir.isEmpty && CompanionBackground.isSafe(dir) }
+        return !skin.isEmpty && safe(out) && safe(hearts) && (1...600).contains(outFrames)
+            && (1...600).contains(heartFrames) && (1...20).contains(heartLoops) && fps.isFinite && fps > 0 && fps <= 60
+    }
+
+    var totalFrames: Int { 2 * outFrames + heartFrames * heartLoops }
+    var duration: TimeInterval { Double(totalFrames) / fps }
+
+    /// The phase and file at `elapsed` seconds in; nil before the start and from the end on.
+    func step(at elapsed: TimeInterval) -> Step? {
+        guard isValid, elapsed.isFinite, elapsed >= 0, elapsed < duration else { return nil }
+        let index = min(Int(elapsed * fps), totalFrames - 1)
+        if index < outFrames { return Step(phase: .out, frame: index) }
+        let inRoom = index - outFrames
+        if inRoom < heartFrames * heartLoops { return Step(phase: .empty, frame: inRoom % heartFrames) }
+        return Step(phase: .back, frame: outFrames - 1 - (inRoom - heartFrames * heartLoops))
     }
 }
 
@@ -3213,37 +3300,124 @@ enum CompanionHeartsBar {
 /// The invisible layer over the room that finds her head: hover shows the pointing hand and the
 /// reaction's hover animation, a click is one pat. The gear button and the resize strip keep
 /// their own clicks.
-struct CompanionHeadpatLayer: View {
+///
+/// This is an AppKit view because SwiftUI's hover cannot hold a cursor: an `NSCursor.push()` from
+/// `onContinuousHover` is undone at once by AppKit's own cursor update for the views underneath (the
+/// hosting view and the terminal panes keep resetting it). A cursor rect on the head rectangle is
+/// what AppKit asks for on every mouse move, so it wins, and it is moved with the head. The view
+/// answers hit tests only inside the head, so every other click reaches the views below.
+struct CompanionHeadpatLayer: NSViewRepresentable {
     let head: (CGSize) -> CGRect?
     let onHover: (Bool) -> Void
     let onPat: () -> Void
-    @State private var over = false
 
-    var body: some View {
-        GeometryReader { area in
-            Color.clear
-                .contentShape(Rectangle())
-                .onContinuousHover { phase in
-                    switch phase {
-                    case .active(let point):
-                        set(CompanionHeadpatHit.contains(point, head: head(area.size), area: area.size))
-                    case .ended:
-                        set(false)
-                    }
-                }
-                .gesture(SpatialTapGesture().onEnded { tap in
-                    if CompanionHeadpatHit.contains(tap.location, head: head(area.size), area: area.size) { onPat() }
-                })
-        }
-        .onDisappear { set(false) }
+    func makeNSView(context: Context) -> CompanionHeadpatNSView { CompanionHeadpatNSView() }
+
+    func updateNSView(_ view: CompanionHeadpatNSView, context: Context) {
+        view.onHover = onHover
+        view.onPat = onPat
+        view.setHead(head(view.bounds.size))
+        // The head moves under a still pointer, too.
+        view.syncHover()
     }
 
-    private func set(_ value: Bool) {
-        guard value != over else { return }
-        over = value
-        if value { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+    static func dismantleNSView(_ view: CompanionHeadpatNSView, coordinator: ()) { view.setHovering(false) }
+}
+
+final class CompanionHeadpatNSView: NSView {
+    var onHover: (Bool) -> Void = { _ in }
+    var onPat: () -> Void = {}
+    private(set) var headRect: CGRect?
+    private var hovering = false
+    private var trackingArea: NSTrackingArea?
+
+    /// Top-left origin, like the room.
+    override var isFlipped: Bool { true }
+
+    /// The part of the head that takes the pointer: not under the gear button or the resize strip.
+    private func hit(_ point: CGPoint) -> Bool {
+        CompanionHeadpatHit.contains(point, head: headRect, area: bounds.size)
+    }
+
+    func setHead(_ rect: CGRect?) {
+        guard rect != headRect else { return }
+        headRect = rect
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func resetCursorRects() {
+        guard let rect = headRect else { return }
+        let gear = CGRect(x: bounds.width - CompanionHeadpatHit.gearSize, y: 0,
+                          width: CompanionHeadpatHit.gearSize, height: CompanionHeadpatHit.gearSize)
+        let strip = CGRect(x: 0, y: bounds.height - CompanionHeadpatHit.stripHeight,
+                           width: bounds.width, height: CompanionHeadpatHit.stripHeight)
+        var area = rect.intersection(bounds)
+        if area.isNull || area.isEmpty { return }
+        // Keep the cursor rect off the strip (the gear is a corner; its overlap is rare and small).
+        if area.maxY > strip.minY { area.size.height = max(0, strip.minY - area.minY) }
+        if area.intersects(gear) { area = area.intersection(CGRect(x: 0, y: 0, width: gear.minX, height: bounds.height)) }
+        if !area.isNull, !area.isEmpty { addCursorRect(area, cursor: .pointingHand) }
+    }
+
+    /// Only the head answers hit tests; elsewhere the click goes to the views below.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let superview else { return nil }
+        return hit(convert(point, from: superview)) ? self : nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .cursorUpdate,
+                                                         .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func layout() {
+        super.layout()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func mouseEntered(with event: NSEvent) { update(with: event) }
+    override func mouseMoved(with event: NSEvent) { update(with: event) }
+    override func mouseExited(with event: NSEvent) { setHovering(false) }
+
+    override func cursorUpdate(with event: NSEvent) {
+        if hit(convert(event.locationInWindow, from: nil)) { NSCursor.pointingHand.set() } else { super.cursorUpdate(with: event) }
+    }
+
+    private func update(with event: NSEvent) {
+        let inside = hit(convert(event.locationInWindow, from: nil))
+        if inside { NSCursor.pointingHand.set() }
+        setHovering(inside)
+    }
+
+    /// Re-checks the pointer against the head after the head moved.
+    func syncHover() {
+        guard let window else { return }
+        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        let inside = bounds.contains(point) && hit(point)
+        // Not inside a view update: the hover changes the model.
+        if inside != hovering { DispatchQueue.main.async { [weak self] in self?.setHovering(inside) } }
+    }
+
+    func setHovering(_ value: Bool) {
+        guard value != hovering else { return }
+        hovering = value
         onHover(value)
     }
+
+    override func mouseDown(with event: NSEvent) {
+        if hit(convert(event.locationInWindow, from: nil)) { onPat() }
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 /// Her hearts: a small pink bar with the heart on the left. The fill moves in whole steps.

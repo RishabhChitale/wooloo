@@ -1623,23 +1623,6 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(player.bubbleText(dialogue: "from the commander", title: nil, override: nil), "from the commander")
     }
 
-    func testThirdPatAlsoPlaysTheThirdSound() {
-        let sounds = CompanionHeadpat.Sounds(pat: "s/pat.wav", third: "s/third.wav")
-        XCTAssertEqual(CompanionHeadpatSound.paths(count: 1, sounds: sounds), ["s/pat.wav"])
-        XCTAssertEqual(CompanionHeadpatSound.paths(count: 2, sounds: sounds), ["s/pat.wav"])
-        XCTAssertEqual(CompanionHeadpatSound.paths(count: 3, sounds: sounds), ["s/pat.wav", "s/third.wav"])
-        XCTAssertEqual(CompanionHeadpatSound.paths(count: 6, sounds: sounds), ["s/pat.wav", "s/third.wav"])
-        XCTAssertEqual(CompanionHeadpatSound.paths(count: 4, sounds: sounds), ["s/pat.wav"])
-    }
-
-    func testHeadpatSoundsPreferenceDefaultsOn() throws {
-        let (defaults, cleanup) = try isolatedDefaults()
-        defer { cleanup() }
-        XCTAssertTrue(CompanionPreferences.headpatSoundsEnabled(defaults: defaults))
-        defaults.set(false, forKey: CompanionPreferences.headpatSoundsKey)
-        XCTAssertFalse(CompanionPreferences.headpatSoundsEnabled(defaults: defaults))
-    }
-
     func testHeadRectFollowsTheSceneTransformAtSeveralZooms() throws {
         // Background 200x100, sprite rect = the whole background, sprite image 100x100, room 100x100.
         let head = [10.0, 10, 20, 20]
@@ -1688,14 +1671,11 @@ final class CompanionTests: XCTestCase {
         XCTAssertNil(off.hearts)
         let json = #"""
         {"version":1,"size":[1,1],"moods":{"idle":[{"dir":"i","frames":1,"fps":4,"loop":true}]},
-         "headpat":{"sounds":{"pat":"s/p.wav","third":"../evil.wav"},
-                    "heads":{"ame":[1,2,3,4],"bad":[1,2],"zero":[1,2,0,4]},
+         "headpat":{"heads":{"ame":[1,2,3,4],"bad":[1,2],"zero":[1,2,0,4]},
                     "reactions":{"idle":{"hover":null,"steps":[[3,"done"],["x",1],[0,"zero"],[8,"love"]],"lines":["a",""]},
                                  "junk":5}}}
         """#
         let on = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8))?.headpat)
-        XCTAssertEqual(on.sounds.pat, "s/p.wav")
-        XCTAssertNil(on.sounds.third, "an unsafe path is dropped")
         XCTAssertEqual(Array(on.heads.keys), ["ame"])
         XCTAssertNil(on.reactions["idle"]?.hover)
         XCTAssertEqual(on.reactions["idle"]?.steps, [Step(pats: 3, key: "done"), Step(pats: 8, key: "love")])
@@ -1968,6 +1948,51 @@ final class CompanionTests: XCTestCase {
             XCTAssertLessThan(late.map(\.y).min() ?? 0, early.map(\.y).min() ?? 0, "they rise")
             XCTAssertTrue(early.allSatisfy { $0.y > area.height * 0.3 }, "start low")
         }
+    }
+
+    private let cuddleJSON = #"""
+    {"icon":"h.png","nap":{"key":"sleep","cuddle":{"skin":"ame","out":"cuddle/out","outFrames":18,
+     "hearts":"cuddle/hearts","heartFrames":8,"fps":10,"heartLoops":3}}}
+    """#
+
+    func testCuddleSceneDecodesAndIsDroppedWhenInvalid() throws {
+        let config = try JSONDecoder().decode(CompanionHearts.self, from: Data(cuddleJSON.utf8))
+        let scene = try XCTUnwrap(config.nap.cuddle)
+        XCTAssertEqual(scene.skin, "ame")
+        XCTAssertEqual(scene.totalFrames, 60)
+        XCTAssertEqual(scene.duration, 6, accuracy: 1e-9)
+        for bad in [#""out":"cuddle/out""#: #""out":"../x""#, #""heartLoops":3"#: #""heartLoops":0"#,
+                    #""fps":10"#: #""fps":0"#, #""outFrames":18"#: #""outFrames":9999"#] {
+            let json = cuddleJSON.replacingOccurrences(of: bad.key, with: bad.value)
+            XCTAssertNil(try JSONDecoder().decode(CompanionHearts.self, from: Data(json.utf8)).nap.cuddle, bad.value)
+        }
+        let none = try JSONDecoder().decode(CompanionHearts.self, from: Data(#"{"nap":{"key":"sleep"}}"#.utf8))
+        XCTAssertNil(none.nap.cuddle)
+        XCTAssertNil(heartsConfig.nap.cuddle)
+    }
+
+    func testCuddleSceneStepsThroughOutEmptyRoomAndBackInReverse() throws {
+        let scene = try XCTUnwrap(JSONDecoder().decode(CompanionHearts.self, from: Data(cuddleJSON.utf8)).nap.cuddle)
+        typealias S = CompanionCuddleScene.Step
+        XCTAssertNil(scene.step(at: -0.01))
+        XCTAssertEqual(scene.step(at: 0), S(phase: .out, frame: 0))
+        XCTAssertEqual(scene.step(at: 0.05), S(phase: .out, frame: 0))
+        XCTAssertEqual(scene.step(at: 1.75), S(phase: .out, frame: 17))
+        XCTAssertEqual(scene.step(at: 1.8), S(phase: .empty, frame: 0), "an instant cut, no gap")
+        XCTAssertEqual(scene.step(at: 2.55), S(phase: .empty, frame: 7))
+        XCTAssertEqual(scene.step(at: 2.6), S(phase: .empty, frame: 0), "the hearts loop")
+        XCTAssertEqual(scene.step(at: 4.15), S(phase: .empty, frame: 7))
+        XCTAssertEqual(scene.step(at: 4.2), S(phase: .back, frame: 17), "she returns from the last out frame")
+        XCTAssertEqual(scene.step(at: 5.95), S(phase: .back, frame: 0))
+        XCTAssertNil(scene.step(at: 6))
+        // Every frame in order: out ascending, hearts 3 loops, back descending; none skipped.
+        var seen: [S] = []
+        for i in 0..<scene.totalFrames { seen.append(try XCTUnwrap(scene.step(at: (Double(i) + 0.5) / scene.fps))) }
+        XCTAssertEqual(seen.filter { $0.phase == .out }.map(\.frame), Array(0..<18))
+        XCTAssertEqual(seen.filter { $0.phase == .empty }.map(\.frame), Array(0..<8) + Array(0..<8) + Array(0..<8))
+        XCTAssertEqual(seen.filter { $0.phase == .back }.map(\.frame), Array((0..<18).reversed()))
+        XCTAssertEqual(seen.map(\.phase), Array(repeating: .out, count: 18) + Array(repeating: .empty, count: 24)
+                       + Array(repeating: .back, count: 18))
     }
 
     func testTestCuddleTriggersOnlyOnANewValue() {
