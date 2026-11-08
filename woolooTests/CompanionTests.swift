@@ -1943,13 +1943,31 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(CompanionCuddle.positions(elapsed: 0, duration: 3, head: head, area: area).count, 1)
         let mid = CompanionCuddle.positions(elapsed: 1.5, duration: 3, head: head, area: area)
         XCTAssertTrue((2...CompanionCuddle.count).contains(mid.count))
-        XCTAssertTrue(mid.allSatisfy { $0.y <= 60 }, "they rise from the head")
         XCTAssertTrue(mid.allSatisfy { $0.x.truncatingRemainder(dividingBy: 4) == 0 && $0.y.truncatingRemainder(dividingBy: 4) == 0 },
                       "hard pixel steps")
         XCTAssertEqual(CompanionCuddle.positions(elapsed: 3, duration: 3, head: head, area: area), [])
         XCTAssertEqual(CompanionCuddle.positions(elapsed: -1, duration: 3, head: head, area: area), [])
         XCTAssertEqual(CompanionCuddle.positions(elapsed: 2.9, duration: 3, head: nil, area: area).count <= 2, true)
         XCTAssertFalse(CompanionCuddle.positions(elapsed: 0.5, duration: 3, head: nil, area: area).isEmpty)
+    }
+
+    func testCuddleHeartsStayInsideTheRoomAndRise() {
+        let area = CGSize(width: 200, height: 150)
+        let heads: [CGRect?] = [nil, CGRect(x: 80, y: 0, width: 40, height: 30), CGRect(x: 60, y: 40, width: 80, height: 90),
+                                CGRect(x: -20, y: 100, width: 300, height: 200)]
+        for head in heads {
+            var t = 0.0
+            while t < 3 {
+                for p in CompanionCuddle.positions(elapsed: t, duration: 3, head: head, area: area) {
+                    XCTAssertTrue((0...area.width).contains(p.x) && (0...area.height).contains(p.y), "\(p) outside for \(String(describing: head))")
+                }
+                t += 0.05
+            }
+            let early = CompanionCuddle.positions(elapsed: 0, duration: 3, head: head, area: area)
+            let late = CompanionCuddle.positions(elapsed: 1.1, duration: 3, head: head, area: area)
+            XCTAssertLessThan(late.map(\.y).min() ?? 0, early.map(\.y).min() ?? 0, "they rise")
+            XCTAssertTrue(early.allSatisfy { $0.y > area.height * 0.3 }, "start low")
+        }
     }
 
     func testTestCuddleTriggersOnlyOnANewValue() {

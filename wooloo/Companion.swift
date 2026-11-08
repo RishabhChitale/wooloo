@@ -1811,7 +1811,8 @@ struct CompanionView: View {
     var body: some View {
         let mood = CompanionMood(agentStatus: commander?.agentStatus)
         TimelineView(.animation(minimumInterval: 1 / max(model.player.sequence?.fps ?? 10,
-                                                         model.cutscene?.transition.fps ?? 0))) { context in
+                                                         model.cutscene?.transition.fps ?? 0,
+                                                         model.cuddle(at: Date()) == nil ? 0 : 1 / CompanionCuddle.tick))) { context in
             VStack(spacing: 6) {
                 room(at: context.date)
                 .frame(height: CompanionPreferences.roomHeight(width: width, factor: heightFactor))
@@ -3167,7 +3168,11 @@ enum CompanionCuddle {
     /// when the pass ends.
     static func positions(elapsed: TimeInterval, duration: TimeInterval, head: CGRect?, area: CGSize) -> [CGPoint] {
         guard elapsed >= 0, elapsed < duration, duration > life, area.width > 0, area.height > 0 else { return [] }
-        let origin = head.map { CGPoint(x: $0.midX, y: $0.minY) } ?? CGPoint(x: area.width / 2, y: area.height * 0.4)
+        // From her chest (the head's bottom edge) up to just inside the top of the room; always inside it.
+        let inset: CGFloat = 8
+        let topY = max(inset, 12)
+        let originX = head?.midX ?? area.width / 2
+        let originY = min(max(head?.maxY ?? area.height * 0.7, area.height * 0.4), area.height - inset)
         let stepped = (elapsed / tick).rounded(.down) * tick
         var result: [CGPoint] = []
         for i in 0..<count {
@@ -3177,9 +3182,10 @@ enum CompanionCuddle {
             let progress = CGFloat(age / life)
             let spread = CGFloat((i * 5) % 7 - 3) * 8
             let sway = (Int(age / tick) % 4 < 2 ? -1 : 1) * CGFloat(4 + i % 3 * 2)
-            let x = origin.x + spread + sway
-            let y = origin.y - progress * area.height * 0.6
-            result.append(CGPoint(x: (x / step).rounded() * step, y: (y / step).rounded() * step))
+            let x = min(max(originX + spread + sway, inset), area.width - inset)
+            let y = max(originY - progress * (originY - topY), topY)
+            result.append(CGPoint(x: min(max((x / step).rounded() * step, inset), area.width - inset),
+                                  y: min(max((y / step).rounded() * step, inset), area.height - inset)))
         }
         return result
     }
