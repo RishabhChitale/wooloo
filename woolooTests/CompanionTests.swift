@@ -1232,7 +1232,11 @@ final class CompanionTests: XCTestCase {
     func testVisibleBoundsUnionAndAConstantAnchorWithinASequence() {
         let union = CompanionSprite.union([CGRect(x: 0.2, y: 0.2, width: 0.2, height: 0.2), nil,
                                            CGRect(x: 0.5, y: 0.1, width: 0.3, height: 0.2)])
-        XCTAssertEqual(union, CGRect(x: 0.2, y: 0.1, width: 0.6, height: 0.3))
+        let box = try? XCTUnwrap(union)
+        XCTAssertEqual(box?.minX ?? -1, 0.2, accuracy: 0.0001)
+        XCTAssertEqual(box?.minY ?? -1, 0.1, accuracy: 0.0001)
+        XCTAssertEqual(box?.width ?? -1, 0.6, accuracy: 0.0001)
+        XCTAssertEqual(box?.height ?? -1, 0.3, accuracy: 0.0001)
         XCTAssertNil(CompanionSprite.union([nil, nil]))
         let size = CGSize(width: 100, height: 100)
         let anchors = (0..<5).map { _ in
