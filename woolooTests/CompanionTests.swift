@@ -1887,12 +1887,23 @@ final class CompanionTests: XCTestCase {
                        skin: "streamer", onlySequence: pass.sequence)
         XCTAssertEqual(player.sequence?.dir, "s/sleep/0", "starts at once")
         XCTAssertEqual(player.frameIndex(at: now0.addingTimeInterval(1)), 0)
-        XCTAssertEqual(player.frameIndex(at: now0.addingTimeInterval(1.25)), 3)
-        XCTAssertEqual(player.frameIndex(at: now0.addingTimeInterval(1.6)), 5, "holds the last frame")
-        XCTAssertTrue(started.isActive(now: now0.addingTimeInterval(1.49)))
-        XCTAssertFalse(started.isActive(now: now0.addingTimeInterval(1.5)), "6 frames at 12 fps = 0.5 s")
+        XCTAssertEqual(pass.sequence.fps, 3, "the nap plays at 3 fps whatever the clip says")
+        XCTAssertEqual(player.frameIndex(at: now0.addingTimeInterval(1.5)), 1)
+        XCTAssertEqual(player.frameIndex(at: now0.addingTimeInterval(2)), 3)
+        XCTAssertEqual(player.frameIndex(at: now0.addingTimeInterval(2.9)), 5, "the last frame shows")
+        // Every frame from 0 to the last is shown, in order, none skipped or held back.
+        var seen: [Int] = []
+        for tick in 0..<20 { seen.append(player.frameIndex(at: now0.addingTimeInterval(1 + Double(tick) * 0.1))) }
+        XCTAssertEqual(Array(Set(seen)).sorted(), [0, 1, 2, 3, 4, 5])
+        XCTAssertEqual(seen, seen.sorted())
+        XCTAssertTrue(started.isActive(now: now0.addingTimeInterval(2.99)))
+        XCTAssertFalse(started.isActive(now: now0.addingTimeInterval(3)), "6 frames at 3 fps = 2 s")
+        // Still the pass one tick before it ends: not restarted by the player.
+        player.advance(now: now0.addingTimeInterval(2.99), mood: .idle, manifest: manifest, sequenceKey: "nap|sleep",
+                       skin: "streamer", onlySequence: pass.sequence)
+        XCTAssertEqual(player.frameIndex(at: now0.addingTimeInterval(2.99)), 5)
         // Straight back to what the mood says.
-        player.advance(now: now0.addingTimeInterval(1.5), mood: .idle, manifest: manifest, sequenceKey: "idle", skin: "streamer")
+        player.advance(now: now0.addingTimeInterval(3), mood: .idle, manifest: manifest, sequenceKey: "idle", skin: "streamer")
         XCTAssertEqual(player.sequence?.dir, "s/idle")
     }
 
@@ -1924,6 +1935,29 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(CompanionHeartsBar.filled(level: 250), CompanionHeartsBar.steps)
         XCTAssertEqual(CompanionHeartsBar.filled(level: .nan), 0)
         XCTAssertEqual(CompanionNap.bubble, "zzz... ♡")
+    }
+
+    func testCuddleHeartsFloatUpAndAreGoneWhenThePassEnds() {
+        let area = CGSize(width: 200, height: 150)
+        let head = CGRect(x: 80, y: 60, width: 40, height: 40)
+        XCTAssertEqual(CompanionCuddle.positions(elapsed: 0, duration: 3, head: head, area: area).count, 1)
+        let mid = CompanionCuddle.positions(elapsed: 1.5, duration: 3, head: head, area: area)
+        XCTAssertTrue((2...CompanionCuddle.count).contains(mid.count))
+        XCTAssertTrue(mid.allSatisfy { $0.y <= 60 }, "they rise from the head")
+        XCTAssertTrue(mid.allSatisfy { $0.x.truncatingRemainder(dividingBy: 4) == 0 && $0.y.truncatingRemainder(dividingBy: 4) == 0 },
+                      "hard pixel steps")
+        XCTAssertEqual(CompanionCuddle.positions(elapsed: 3, duration: 3, head: head, area: area), [])
+        XCTAssertEqual(CompanionCuddle.positions(elapsed: -1, duration: 3, head: head, area: area), [])
+        XCTAssertEqual(CompanionCuddle.positions(elapsed: 2.9, duration: 3, head: nil, area: area).count <= 2, true)
+        XCTAssertFalse(CompanionCuddle.positions(elapsed: 0.5, duration: 3, head: nil, area: area).isEmpty)
+    }
+
+    func testTestCuddleTriggersOnlyOnANewValue() {
+        XCTAssertFalse(CompanionNap.testTriggered(current: nil, last: nil))
+        XCTAssertFalse(CompanionNap.testTriggered(current: "", last: "a"))
+        XCTAssertFalse(CompanionNap.testTriggered(current: "a", last: "a"))
+        XCTAssertTrue(CompanionNap.testTriggered(current: "b", last: "a"))
+        XCTAssertTrue(CompanionNap.testTriggered(current: "a", last: nil))
     }
 
     func testHeartsTipPosition() {

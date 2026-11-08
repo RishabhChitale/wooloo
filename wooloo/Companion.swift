@@ -1241,7 +1241,7 @@ final class CompanionModel: ObservableObject {
             return manifest.hasOwnSequences(forKey: candidate, skin: skin) ? candidate : nil
         }
         // The nap pass outranks every sequence while it plays; a skin change or cutscene cancels it.
-        if let config = manifest.hearts { tickHearts(now: now, config: config) }
+        if let config = manifest.hearts { tickHearts(now: now, config: config); checkTestCuddle(config: config) }
         if cutscene != nil { napPass = nil }
         if var pass = napPass {
             if pass.startedAt == nil { pass.startedAt = now }
@@ -1386,6 +1386,23 @@ final class CompanionModel: ObservableObject {
     func patBubble(now: Date) -> String? {
         if napPass?.isActive(now: now) == true { return CompanionNap.bubble }
         return patSession.bubbleLine(now: now)
+    }
+
+    /// Seconds into the nap pass and its length; nil when no pass plays.
+    func cuddle(at now: Date) -> (elapsed: TimeInterval, duration: TimeInterval)? {
+        guard let pass = napPass, let started = pass.startedAt, pass.isActive(now: now) else { return nil }
+        return (now.timeIntervalSince(started), pass.sequence.duration)
+    }
+
+    private var testCuddleSeen: String??
+
+    /// A new value of `companionTestCuddle` while running fires the pass once; nothing else changes.
+    private func checkTestCuddle(config: CompanionHearts) {
+        let current = UserDefaults.standard.string(forKey: CompanionNap.testDefaultsKey)
+        guard let seen = testCuddleSeen else { testCuddleSeen = .some(current); return }
+        guard CompanionNap.testTriggered(current: current, last: seen) else { return }
+        testCuddleSeen = .some(current)
+        if napPass == nil { startNap(config: config) }
     }
 
     /// The hearts bar is shown when the manifest has hearts.
@@ -1798,6 +1815,7 @@ struct CompanionView: View {
             VStack(spacing: 6) {
                 room(at: context.date)
                 .frame(height: CompanionPreferences.roomHeight(width: width, factor: heightFactor))
+                .overlay { cuddleLayer(at: context.date) }
                 .overlay { headpatLayer(at: context.date) }
                 .overlay(alignment: .topLeading) {
                     // Over the cutscene too; left-aligned, so it never covers the gear button.
@@ -1859,6 +1877,24 @@ struct CompanionView: View {
 
 extension CompanionView {
     /// Her head: a pointing hand over it, a click is a pat. Not while a cutscene plays.
+    @ViewBuilder
+    fileprivate func cuddleLayer(at date: Date) -> some View {
+        if let run = model.cuddle(at: date), let icon = model.heartsIcon.flatMap({ model.image(forPath: $0) }) {
+            GeometryReader { area in
+                let height = CompanionHeartsBarView.iconHeight
+                let width = height * CGFloat(icon.width) / CGFloat(max(icon.height, 1))
+                let head = model.headRect(area: area.size, zoom: CompanionPreferences.clampedZoom(zoom), now: date)
+                ForEach(Array(CompanionCuddle.positions(elapsed: run.elapsed, duration: run.duration,
+                                                        head: head, area: area.size).enumerated()), id: \.offset) { _, point in
+                    Image(decorative: icon, scale: 1).interpolation(.none).resizable()
+                        .frame(width: width, height: height)
+                        .position(point)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
     @ViewBuilder
     fileprivate func headpatLayer(at date: Date) -> some View {
         if model.manifest?.headpat != nil {
@@ -3084,7 +3120,19 @@ enum CompanionNap {
 
     /// The clip played once: no loop, and no blink or gesture holds.
     static func oneShot(_ sequence: CompanionSequence) -> CompanionSequence {
-        CompanionSequence(dir: sequence.dir, frames: sequence.frames, fps: sequence.fps, loop: false, style: nil)
+        CompanionSequence(dir: sequence.dir, frames: sequence.frames, fps: fps, loop: false, style: nil)
+    }
+
+    /// The nap clip always plays at this speed, so a 9-frame clip takes 3 seconds.
+    static let fps = 3.0
+
+    /// The test trigger: a value of `companionTestCuddle` that differs from the last one seen
+    /// (the first one seen, at launch, only becomes the baseline).
+    static let testDefaultsKey = "companionTestCuddle"
+
+    static func testTriggered(current: String?, last: String?) -> Bool {
+        guard let current, !current.isEmpty else { return false }
+        return current != last
     }
 
     /// A pass in play: it started at `startedAt` (set when its first frame shows) and lasts one run.
@@ -3104,6 +3152,36 @@ enum CompanionNap {
         guard !sequences.isEmpty else { return nil }
         return Pass(key: key, sequence: oneShot(sequences[min(max(0, pick(sequences.count)), sequences.count - 1)]),
                     startedAt: nil)
+    }
+}
+
+/// The hearts that float up from her head while the nap pass plays.
+enum CompanionCuddle {
+    static let count = 7
+    static let life: TimeInterval = 1.2
+    static let step: CGFloat = 4
+    static let tick: TimeInterval = 1.0 / 6
+
+    /// Centres of the hearts alive `elapsed` seconds into a pass of `duration`: they start one after
+    /// another, rise from the head across the room in hard steps, sway sideways, and are all gone
+    /// when the pass ends.
+    static func positions(elapsed: TimeInterval, duration: TimeInterval, head: CGRect?, area: CGSize) -> [CGPoint] {
+        guard elapsed >= 0, elapsed < duration, duration > life, area.width > 0, area.height > 0 else { return [] }
+        let origin = head.map { CGPoint(x: $0.midX, y: $0.minY) } ?? CGPoint(x: area.width / 2, y: area.height * 0.4)
+        let stepped = (elapsed / tick).rounded(.down) * tick
+        var result: [CGPoint] = []
+        for i in 0..<count {
+            let start = Double(i) * (duration - life) / Double(count - 1)
+            let age = stepped - start
+            guard age >= 0, age < life else { continue }
+            let progress = CGFloat(age / life)
+            let spread = CGFloat((i * 5) % 7 - 3) * 8
+            let sway = (Int(age / tick) % 4 < 2 ? -1 : 1) * CGFloat(4 + i % 3 * 2)
+            let x = origin.x + spread + sway
+            let y = origin.y - progress * area.height * 0.6
+            result.append(CGPoint(x: (x / step).rounded() * step, y: (y / step).rounded() * step))
+        }
+        return result
     }
 }
 
