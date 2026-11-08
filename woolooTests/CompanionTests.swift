@@ -1386,4 +1386,138 @@ final class CompanionTests: XCTestCase {
         _ = scheduler.due(now: date(10, 6), ameIsIdle: true, mood: "sad", calendar: utc, defaults: defaults, random: high)
         XCTAssertEqual(scheduler.nextFire, date(10, 5).addingTimeInterval(50 * 60), "only once per wait")
     }
+
+    // MARK: Ambient behaviours
+
+    private func ambientRun(_ entries: [CompanionAmbient], baseMood: String = "idle", skinHas: @escaping (String) -> Bool = { _ in true },
+                            hour: Int = 14, idle: Double = 0, seed: UInt64 = 1, seconds: Int = 600) -> [String?] {
+        var scheduler = CompanionAmbientScheduler(seed: seed)
+        var playing: [String?] = []
+        for second in 0..<seconds {
+            playing.append(scheduler.update(now: now0.addingTimeInterval(Double(second)), context: "ctx", baseMood: baseMood,
+                                            entries: entries, skinHas: skinHas, minutesIdle: idle, hour: hour))
+        }
+        return playing
+    }
+
+    func testAmbientWaitsThenPlaysThenRestsAndNeverRepeatsAtOnce() {
+        let entries = [CompanionAmbient(key: "tweet", moods: ["idle"]), CompanionAmbient(key: "tv", moods: ["idle"])]
+        let run = ambientRun(entries, seconds: 1200)
+        let firstStart = run.firstIndex { $0 != nil }
+        XCTAssertNotNil(firstStart)
+        XCTAssertGreaterThanOrEqual(firstStart ?? 0, 25, "waits at least 25 s")
+        XCTAssertLessThanOrEqual(firstStart ?? 999, 61)
+        // Split into plays and check lengths, rests and that no key follows itself.
+        var plays: [(key: String, start: Int, end: Int)] = []
+        for (second, key) in run.enumerated() {
+            guard let key else { continue }
+            if let last = plays.last, last.key == key, last.end == second { plays[plays.count - 1].end = second + 1 }
+            else { plays.append((key, second, second + 1)) }
+        }
+        XCTAssertGreaterThanOrEqual(plays.count, 4)
+        for play in plays.dropLast() { XCTAssertTrue((20...46).contains(play.end - play.start), "played \(play.end - play.start) s") }
+        for (a, b) in zip(plays, plays.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(b.start - a.end, 30, "rests at least 30 s")
+            XCTAssertNotEqual(a.key, b.key, "never the same clip twice in a row")
+        }
+    }
+
+    func testAmbientNeedsACalmBaseMoodASkinClipAndAMatchingMood() {
+        let tweet = [CompanionAmbient(key: "tweet", moods: ["idle", "done"])]
+        XCTAssertTrue(ambientRun(tweet, baseMood: "working").allSatisfy { $0 == nil })
+        XCTAssertTrue(ambientRun(tweet, baseMood: "love").allSatisfy { $0 == nil })
+        XCTAssertTrue(ambientRun(tweet, baseMood: "waiting").allSatisfy { $0 == nil }, "waiting is not in its moods")
+        XCTAssertTrue(ambientRun(tweet, baseMood: "done").contains { $0 == "tweet" })
+        XCTAssertTrue(ambientRun(tweet, skinHas: { $0 != "tweet" }).allSatisfy { $0 == nil }, "a skin without the clip skips it")
+        XCTAssertTrue(ambientRun([]).allSatisfy { $0 == nil })
+    }
+
+    func testAmbientStopsAtOnceWhenTheContextChangesOrItIsNotAllowed() {
+        var scheduler = CompanionAmbientScheduler(seed: 3)
+        let entries = [CompanionAmbient(key: "tv", moods: ["idle"])]
+        var t = now0
+        var playingAt: Date?
+        for _ in 0..<200 {
+            t = t.addingTimeInterval(1)
+            if scheduler.update(now: t, context: "a", baseMood: "idle", entries: entries, skinHas: { _ in true },
+                                minutesIdle: 0, hour: 12) != nil { playingAt = t; break }
+        }
+        XCTAssertNotNil(playingAt, "it started")
+        XCTAssertNil(scheduler.update(now: t.addingTimeInterval(1), context: "b", baseMood: "idle", entries: entries,
+                                      skinHas: { _ in true }, minutesIdle: 0, hour: 12), "mood or skin changed")
+        // Back in the old context it waits again from the start.
+        XCTAssertNil(scheduler.update(now: t.addingTimeInterval(2), context: "a", baseMood: "idle", entries: entries,
+                                      skinHas: { _ in true }, minutesIdle: 0, hour: 12))
+        XCTAssertNil(scheduler.update(now: t.addingTimeInterval(3), context: "a", baseMood: nil, entries: entries,
+                                      skinHas: { _ in true }, minutesIdle: 0, hour: 12), "not allowed")
+        XCTAssertEqual(scheduler.phase, .idle)
+    }
+
+    func testAmbientHoursWrapPastMidnight() {
+        let night = CompanionAmbient(key: "sleep", moods: ["idle"], hours: [23, 6])
+        for hour in [23, 0, 3, 5] { XCTAssertTrue(night.fits(hour: hour, minutesIdle: 0), "\(hour)") }
+        for hour in [6, 12, 22] { XCTAssertFalse(night.fits(hour: hour, minutesIdle: 0), "\(hour)") }
+        let day = CompanionAmbient(key: "out", moods: ["idle"], hours: [9, 17])
+        XCTAssertTrue(day.fits(hour: 9, minutesIdle: 0))
+        XCTAssertFalse(day.fits(hour: 17, minutesIdle: 0))
+        XCTAssertTrue(ambientRun([night], hour: 2).contains { $0 == "sleep" })
+        XCTAssertTrue(ambientRun([night], hour: 14).allSatisfy { $0 == nil })
+    }
+
+    func testAmbientEitherAndBothConditions() {
+        let both = CompanionAmbient(key: "sleep", moods: ["idle"], hours: [23, 6], minIdleMinutes: 30)
+        let either = CompanionAmbient(key: "sleep", moods: ["idle"], hours: [23, 6], minIdleMinutes: 30, either: true)
+        XCTAssertFalse(both.fits(hour: 2, minutesIdle: 5))
+        XCTAssertFalse(both.fits(hour: 14, minutesIdle: 60))
+        XCTAssertTrue(both.fits(hour: 2, minutesIdle: 60))
+        XCTAssertTrue(either.fits(hour: 2, minutesIdle: 5))
+        XCTAssertTrue(either.fits(hour: 14, minutesIdle: 60))
+        XCTAssertFalse(either.fits(hour: 14, minutesIdle: 5))
+        XCTAssertTrue(CompanionAmbient(key: "tweet", moods: ["idle"]).fits(hour: 4, minutesIdle: 0), "no conditions: always")
+    }
+
+    func testAmbientPicksByWeight() {
+        var scheduler = CompanionAmbientScheduler(seed: 42)
+        let entries = [CompanionAmbient(key: "rare", moods: ["idle"], weight: 1), CompanionAmbient(key: "common", moods: ["idle"], weight: 9)]
+        var counts: [String: Int] = [:]
+        for _ in 0..<2000 {
+            if let picked = scheduler.pick(baseMood: "idle", entries: entries, skinHas: { _ in true }, minutesIdle: 0, hour: 12) {
+                counts[picked.key, default: 0] += 1
+            }
+        }
+        // The last key is excluded each time, so check the weights through a fresh scheduler.
+        var single = 0
+        for seed in 0..<500 {
+            var fresh = CompanionAmbientScheduler(seed: UInt64(seed))
+            if fresh.pick(baseMood: "idle", entries: entries, skinHas: { _ in true }, minutesIdle: 0, hour: 12)?.key == "common" { single += 1 }
+        }
+        XCTAssertTrue((400...490).contains(single), "about 90% common: \(single)")
+        XCTAssertGreaterThan(counts.count, 0)
+    }
+
+    func testAmbientDecodeIsLossyAndKeepsOnlyValidEntries() throws {
+        let json = #"""
+        {"version":1,"size":[1,1],"moods":{"idle":[{"dir":"i","frames":1,"fps":4,"loop":true}]},
+         "ambient":[{"key":"tweet","moods":["idle","done"],"weight":2,"hours":[9,23],"minIdleMinutes":5,"either":true},
+                    {"key":"sleep","moods":["idle"],"weight":1,"hours":[23,6],"extra":"ignored"},
+                    {"key":"bad","moods":["idle"],"weight":0},
+                    {"key":"nomoods","moods":[],"weight":1},
+                    {"key":"../x","moods":["idle"],"weight":1},
+                    {"key":"hours","moods":["idle"],"weight":1,"hours":[1,2,3]},
+                    {"moods":["idle"],"weight":1}, "junk"]}
+        """#
+        let manifest = try XCTUnwrap(CompanionManifest.decode(Data(json.utf8)))
+        XCTAssertEqual(manifest.ambient.map(\.key), ["tweet", "sleep"])
+        XCTAssertEqual(manifest.ambient.first?.either, true)
+        XCTAssertEqual(manifest.ambient.first?.hours, [9, 23])
+        XCTAssertEqual(manifest.ambient.first?.minIdleMinutes, 5)
+    }
+
+    func testAmbientPreferenceDefaultsOn() throws {
+        let (defaults, cleanup) = try isolatedDefaults()
+        defer { cleanup() }
+        XCTAssertTrue(CompanionPreferences.ambientEnabled(defaults: defaults))
+        defaults.set(false, forKey: CompanionPreferences.ambientKey)
+        XCTAssertFalse(CompanionPreferences.ambientEnabled(defaults: defaults))
+    }
 }

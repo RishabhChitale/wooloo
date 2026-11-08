@@ -20,6 +20,12 @@ enum CompanionPreferences {
     static let transitionsKey = "companionTransitions"
     /// Whether Ame texts on her own now and then; on unless turned off.
     static let nudgesKey = "companionNudges"
+    /// Whether she does things on her own while idle; on unless turned off.
+    static let ambientKey = "companionAmbient"
+
+    static func ambientEnabled(defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: ambientKey) as? Bool ?? true
+    }
 
     static func nudgesEnabled(defaults: UserDefaults = .standard) -> Bool {
         defaults.object(forKey: nudgesKey) as? Bool ?? true
@@ -204,6 +210,7 @@ struct CompanionWebcamSettings: View {
     @AppStorage(HerdrNotifier.notifyAmeKey) private var notifiesAme = false
     @AppStorage(CompanionPreferences.transitionsKey) private var playsTransitions = true
     @AppStorage(CompanionPreferences.nudgesKey) private var nudges = true
+    @AppStorage(CompanionPreferences.ambientKey) private var idleBehaviours = true
     @Environment(\.woolooTypography) private var typography
 
     @State private var contentHeight: CGFloat = 0
@@ -230,6 +237,7 @@ struct CompanionWebcamSettings: View {
                         checkbox("Play transformation when changing skin", isOn: $playsTransitions)
                         checkbox("Notify when Ame replies on JINE", isOn: $notifiesAme)
                         checkbox("Ame texts me on her own", isOn: $nudges)
+                        checkbox("Idle behaviours", isOn: $idleBehaviours)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background {

@@ -72,6 +72,61 @@ struct CompanionSkinChoice: Equatable, Sendable {
     let label: String
 }
 
+/// A thing she does on her own while idle: a clip key the skin may define (`tweet`, `sleep`…),
+/// the base moods it suits, how likely it is, and when it fits.
+struct CompanionAmbient: Decodable, Equatable, Sendable {
+    let key: String
+    let moods: [String]
+    let weight: Double
+    /// Start and end hour of the day it fits (the end excluded); the span may wrap midnight.
+    let hours: [Int]?
+    /// It fits once the commander has not worked for this many minutes.
+    let minIdleMinutes: Double?
+    /// With both conditions given: either one is enough (otherwise both are needed).
+    let either: Bool
+
+    enum CodingKeys: String, CodingKey { case key, moods, weight, hours, minIdleMinutes, either }
+
+    init(key: String, moods: [String], weight: Double = 1, hours: [Int]? = nil,
+         minIdleMinutes: Double? = nil, either: Bool = false) {
+        self.key = key
+        self.moods = moods
+        self.weight = weight
+        self.hours = hours
+        self.minIdleMinutes = minIdleMinutes
+        self.either = either
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        key = try values.decode(String.self, forKey: .key)
+        moods = (try? values.decodeIfPresent([String].self, forKey: .moods)) ?? []
+        weight = try values.decode(Double.self, forKey: .weight)
+        hours = (try? values.decodeIfPresent([Int].self, forKey: .hours)) ?? nil
+        minIdleMinutes = (try? values.decodeIfPresent(Double.self, forKey: .minIdleMinutes)) ?? nil
+        either = (try? values.decodeIfPresent(Bool.self, forKey: .either)) ?? false
+    }
+
+    var isValid: Bool {
+        !key.isEmpty && key.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }
+            && !moods.isEmpty && weight.isFinite && weight > 0
+            && (hours.map { $0.count == 2 && $0.allSatisfy { (0...24).contains($0) } } ?? true)
+            && (minIdleMinutes.map { $0.isFinite && $0 >= 0 } ?? true)
+    }
+
+    /// Whether the hour and idle conditions allow it now; with none given it always does.
+    func fits(hour: Int, minutesIdle: Double) -> Bool {
+        var conditions: [Bool] = []
+        if let hours, hours.count == 2 {
+            let (start, end) = (hours[0], hours[1])
+            conditions.append(start <= end ? (start..<end).contains(hour) : (hour >= start || hour < end))
+        }
+        if let minIdleMinutes { conditions.append(minutesIdle >= minIdleMinutes) }
+        guard !conditions.isEmpty else { return true }
+        return either ? conditions.contains(true) : !conditions.contains(false)
+    }
+}
+
 /// A cutscene played when the skin changes: full-scene frames `<dir>/000.png`….
 struct CompanionTransition: Decodable, Equatable, Sendable {
     /// A skin id, or "*" for any skin.
@@ -151,6 +206,8 @@ extension CompanionManifest {
             .compactMapValues(\.value) ?? [:]
         transitions = ((try? values.decodeIfPresent([Lossy<CompanionTransition>].self, forKey: .transitions)) ?? nil)?
             .compactMap(\.value) ?? []
+        ambient = ((try? values.decodeIfPresent([Lossy<CompanionAmbient>].self, forKey: .ambient)) ?? nil)?
+            .compactMap(\.value) ?? []
     }
 }
 
@@ -191,9 +248,11 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
     let skins: [String: CompanionSkin]
     /// Cutscenes for skin changes.
     var transitions: [CompanionTransition] = []
+    /// What she does on her own while idle.
+    var ambient: [CompanionAmbient] = []
 
     enum CodingKeys: String, CodingKey {
-        case version, size, moods, lines, background, activities, stickers, font, skins, transitions
+        case version, size, moods, lines, background, activities, stickers, font, skins, transitions, ambient
         case spriteRect = "sprite_rect"
     }
 
@@ -233,7 +292,8 @@ struct CompanionManifest: Decodable, Equatable, Sendable {
                                      return usable.values.contains(where: { !$0.isEmpty })
                                          ? CompanionSkin(label: skin.label, moods: usable) : nil
                                  },
-                                 transitions: manifest.transitions.filter(\.isValid))
+                                 transitions: manifest.transitions.filter(\.isValid),
+                                 ambient: manifest.ambient.filter(\.isValid))
     }
 
     /// The cutscene for changing from skin `old` to `new`: an exact match first, then one from
@@ -1057,6 +1117,10 @@ final class CompanionModel: ObservableObject {
     private var dialogueInFlight = false
     private var directory = CompanionManifest.directory
     private var currentSkin: String?
+    private var ambient = CompanionAmbientScheduler()
+    private var ambientKey: String?
+    private var baseKey: String?
+    private var lastWorked: Date?
     /// The last sprite shown, kept on screen while the next sequence's frames load.
     private var lastImage: CGImage?
     private var shownDir: String?
@@ -1142,6 +1206,20 @@ final class CompanionModel: ObservableObject {
                 key = wanted
             }
         }
+        // While idle she does her own things now and then; any change of mood, skin or activity,
+        // a cutscene, a game or stream activity, or the setting off, ends it.
+        if mood == .working { lastWorked = now }
+        baseKey = key
+        let calm = CompanionAmbientScheduler.baseMoods.contains(key) && (activityID ?? CompanionPreferences.defaultActivity)
+            == CompanionPreferences.defaultActivity && cutscene == nil && CompanionPreferences.ambientEnabled()
+        let skinKeys = manifest
+        let doing = ambient.update(
+            now: now, context: "\(skin ?? "")|\(key)|\(activityID ?? "")|\(cutscene == nil)", baseMood: calm ? key : nil,
+            entries: manifest.ambient, skinHas: { skinKeys.hasOwnSequences(forKey: $0, skin: skin) },
+            minutesIdle: lastWorked.map { now.timeIntervalSince($0) / 60 } ?? .infinity,
+            hour: Calendar.current.component(.hour, from: now))
+        ambientKey = doing
+        if let doing { key = doing }
         let before = player.sequence
         let changedPlayer = next.advance(now: now, mood: mood, manifest: manifest, sequenceKey: key, skin: skin,
                                          lineKey: lineKey,
@@ -1263,12 +1341,13 @@ final class CompanionModel: ObservableObject {
     func tickNudge(now: Date, ame: HerdrAgent?, commanderStatus: String?, store: HerdrStore) {
         guard manifest != nil, let ame, store.isConnected else { return }
         guard CompanionPreferences.nudgesEnabled() else { return }
-        let mood = publishedKey ?? "idle"
+        let mood = baseKey ?? "idle"
         guard nudges.due(now: now, ameIsIdle: CompanionNudge.isAvailable(status: ame.agentStatus), mood: mood)
         else { return }
         let hint = CompanionNudge.hint(commanderWorking: CompanionMood(agentStatus: commanderStatus) == .working,
                                        runningTasks: 0)
-        guard let params = CompanionMessage.promptParams(paneID: ame.paneID, text: CompanionNudge.text(now: now, mood: mood, doing: nil, hint: hint))
+        guard let params = CompanionMessage.promptParams(paneID: ame.paneID, text: CompanionNudge.text(now: now, mood: mood, doing: ambientKey.flatMap(CompanionNudge.doingPhrase(forAmbientKey:)),
+                                                                  hint: hint))
         else { return }
         Task { try? await store.sendAgentPrompt(params) }
     }
@@ -2147,5 +2226,109 @@ enum CompanionMoodResolver {
         guard !loveReaction, let mood = ameMood?.lowercased(), CompanionMessage.validMoods.contains(mood),
               let age, age <= window else { return commanderKey }
         return mood
+    }
+}
+
+// MARK: Things she does on her own
+
+/// A small seeded generator, so the scheduler can be tested.
+struct CompanionSplitMix64: RandomNumberGenerator {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+}
+
+/// Decides when she does one of her ambient things. In a calm base mood (idle, done or waiting)
+/// she waits 25-60 s, picks one entry by weight, plays it for 20-45 s, rests for 30-90 s and may
+/// pick again. Any change of `context` (mood, skin, activity, a cutscene...) stops it at once.
+struct CompanionAmbientScheduler {
+    static let dwell: ClosedRange<TimeInterval> = 25...60
+    static let play: ClosedRange<TimeInterval> = 20...45
+    static let cooldown: ClosedRange<TimeInterval> = 30...90
+    static let baseMoods: Set<String> = ["idle", "done", "waiting"]
+
+    enum Phase: Equatable {
+        case idle
+        case dwelling(until: Date)
+        case playing(key: String, until: Date)
+        case cooling(until: Date)
+    }
+
+    private(set) var phase = Phase.idle
+    private(set) var lastKey: String?
+    private var context: String?
+    private var generator: CompanionSplitMix64
+
+    init(seed: UInt64 = UInt64.random(in: 0...UInt64.max)) {
+        generator = CompanionSplitMix64(seed: seed)
+    }
+
+    var playingKey: String? {
+        if case .playing(let key, _) = phase { return key }
+        return nil
+    }
+
+    private mutating func random(_ range: ClosedRange<TimeInterval>) -> TimeInterval {
+        range.lowerBound + Double.random(in: 0..<1, using: &generator) * (range.upperBound - range.lowerBound)
+    }
+
+    /// The entry to play now, if any: it suits the mood, the skin has its clip, it fits the hour
+    /// and the commander's idle time, and it is not the one played last.
+    mutating func pick(baseMood: String, entries: [CompanionAmbient], skinHas: (String) -> Bool,
+                       minutesIdle: Double, hour: Int) -> CompanionAmbient? {
+        let candidates = entries.filter {
+            $0.moods.contains(baseMood) && skinHas($0.key) && $0.key != lastKey
+                && $0.fits(hour: hour, minutesIdle: minutesIdle)
+        }
+        let total = candidates.reduce(0) { $0 + $1.weight }
+        guard !candidates.isEmpty, total > 0 else { return nil }
+        var point = Double.random(in: 0..<total, using: &generator)
+        for entry in candidates {
+            if point < entry.weight { return entry }
+            point -= entry.weight
+        }
+        return candidates.last
+    }
+
+    /// Call often. `baseMood` is nil whenever she must not do anything (a cutscene, a game or
+    /// stream activity, the setting off). Returns the key of the clip to play, or nil.
+    mutating func update(now: Date, context: String, baseMood: String?, entries: [CompanionAmbient],
+                         skinHas: (String) -> Bool, minutesIdle: Double, hour: Int) -> String? {
+        if context != self.context {
+            self.context = context
+            phase = .idle
+        }
+        guard let baseMood, Self.baseMoods.contains(baseMood), !entries.isEmpty else {
+            phase = .idle
+            return nil
+        }
+        func choose(_ scheduler: inout CompanionAmbientScheduler) {
+            if let entry = scheduler.pick(baseMood: baseMood, entries: entries, skinHas: skinHas,
+                                          minutesIdle: minutesIdle, hour: hour) {
+                scheduler.lastKey = entry.key
+                scheduler.phase = .playing(key: entry.key, until: now.addingTimeInterval(scheduler.random(Self.play)))
+            } else {
+                // Nothing fits right now: look again after another wait.
+                scheduler.phase = .dwelling(until: now.addingTimeInterval(scheduler.random(Self.dwell)))
+            }
+        }
+        switch phase {
+        case .idle:
+            phase = .dwelling(until: now.addingTimeInterval(random(Self.dwell)))
+        case .dwelling(let until):
+            if now >= until { choose(&self) }
+        case .playing(_, let until):
+            if now >= until { phase = .cooling(until: now.addingTimeInterval(random(Self.cooldown))) }
+        case .cooling(let until):
+            if now >= until { choose(&self) }
+        }
+        return playingKey
     }
 }
