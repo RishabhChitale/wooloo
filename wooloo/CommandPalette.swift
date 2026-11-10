@@ -276,6 +276,7 @@ struct WoolooCommandItem: Identifiable, Equatable {
               KeyboardShortcut("e", modifiers: [.command, .control])),
         .init("toggle_file_explorer", "View", "Toggle File Explorer"),
         .init("toggle_github", "View", "Toggle GitHub"),
+        .init("toggle_spaces_only", "View", "Toggle Spaces Only"),
         .init("refresh_files", "View", "Refresh Files and Repository", KeyboardShortcut("r", modifiers: .command)),
         // No key: VS Code's ⌥Z types Ω in the editor and the terminal.
         .init("toggle_wrap_lines", "View", "Toggle Line Wrapping"),

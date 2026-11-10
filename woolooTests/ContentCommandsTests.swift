@@ -698,6 +698,14 @@ final class ContentCommandsTests: XCTestCase {
         commands.perform("toggle_files_sidebar")
         XCTAssertTrue(window.showsFilesSidebar)
 
+        let spacesOnlyBefore = UserDefaults.standard.object(forKey: RightSidebarLayout.spacesOnlyKey)
+        defer { UserDefaults.standard.set(spacesOnlyBefore, forKey: RightSidebarLayout.spacesOnlyKey) }
+        UserDefaults.standard.set(false, forKey: RightSidebarLayout.spacesOnlyKey)
+        commands.perform("toggle_spaces_only")
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: RightSidebarLayout.spacesOnlyKey))
+        commands.perform("toggle_spaces_only")
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: RightSidebarLayout.spacesOnlyKey))
+
         commands.perform("switch_session")
         XCTAssertTrue(window.showsSidebar, "The session picker lives in the sidebar")
         XCTAssertTrue(window.showsSessionPicker)

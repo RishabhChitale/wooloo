@@ -241,7 +241,7 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertFalse(window.commandPalette.results.contains { $0.item.action == "new_tab" },
                        "Disconnected, Herdr commands are not offered")
         window.commandPalette.query = "toggle"
-        XCTAssertEqual(window.commandPalette.results.count, 5, "the sidebars, the file explorer, GitHub and line wrapping")
+        XCTAssertEqual(window.commandPalette.results.count, 6, "the sidebars, the file explorer, GitHub, Spaces only and line wrapping")
         commands.perform(.commandPalette)
         XCTAssertEqual(window.commandPalette.selection, 1, "⇧⌘P again selects the next command")
         window.showsSidebar = true

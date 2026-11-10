@@ -77,6 +77,7 @@ private struct DestinationContentView: View {
     @State private var followsHerdrAgentView = true
     @AppStorage("filesSidebarShowsExplorer") private var showsExplorer = false
     @AppStorage("filesSidebarShowsGitHub") private var showsGitHub = false
+    @AppStorage(RightSidebarLayout.spacesOnlyKey) private var spacesOnly = false
     @State private var spacesContentHeight: CGFloat = 0
     @State private var connectionRequest = UUID()
     @State private var popupDocument: (session: String, space: String?, tab: String?, document: String)?
@@ -341,7 +342,7 @@ private struct DestinationContentView: View {
                                     range: 200...max(200, min(560, totalWidth - left - mainMinimum)))
                 VStack(spacing: 0) {
                     CompanionPanel(store: herdr, agents: herdr.snapshot?.agents ?? [], workspaceID: herdr.selectedWorkspaceID,
-                                   width: filesSidebarWidth)
+                                   width: filesSidebarWidth, spacesOnly: spacesOnly)
                     filesSidebarSpaces
                     HStack(spacing: 12) {
                         Spacer()
@@ -449,11 +450,22 @@ private struct DestinationContentView: View {
     }
 
     /// The Spaces list and its New Space button; the left sidebar and the top of the right one show it.
-    private var spacesSection: some View {
+    private func spacesSection(spacesToggle: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 0) {
                 sectionTitle("SPACES", icon: "square.stack")
                 Spacer()
+                if spacesToggle {
+                    Button { spacesOnly.toggle() } label: {
+                        Image(systemName: "square.stack")
+                            .font(.system(size: typography.secondary, weight: .semibold))
+                            .foregroundStyle(spacesOnly ? theme.accent : Color.secondary)
+                            .frame(width: 23, height: typography.metric(20))
+                    }
+                    .buttonStyle(.plain)
+                    .help(spacesOnly ? "Show Ame-chan and JINE" : "Show only Spaces")
+                    .accessibilityIdentifier("toggle-spaces-only")
+                }
                 Button {
                     activeDocumentID = nil
                     destinations.createSpace(on: herdr)
@@ -489,9 +501,10 @@ private struct DestinationContentView: View {
 
     /// The Spaces list on top of the right sidebar, so Spaces stay reachable with the left sidebar
     /// hidden. It is as tall as its rows, up to about six, and scrolls beyond that.
+    @ViewBuilder
     private var filesSidebarSpaces: some View {
-        ScrollView {
-            spacesSection
+        let scroll = ScrollView {
+            spacesSection(spacesToggle: true)
                 .padding(7)
                 .background {
                     GeometryReader { proxy in
@@ -501,14 +514,20 @@ private struct DestinationContentView: View {
                     }
                 }
         }
-        .frame(height: min(spacesContentHeight, typography.metric(210)))
+        if RightSidebarLayout.spacesFillsSidebar(spacesOnly: spacesOnly) && !showsExplorer && !showsGitHub {
+            // Fills the sidebar from the top down to the Files and GitHub row; with a panel open
+            // below, Spaces keep their usual height.
+            scroll.frame(maxHeight: .infinity)
+        } else {
+            scroll.frame(height: min(spacesContentHeight, typography.metric(210)))
+        }
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 13) {
-                    spacesSection
+                    spacesSection()
 
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 0) {

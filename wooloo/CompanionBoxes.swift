@@ -394,6 +394,8 @@ struct CompanionJineBox: View {
     @ObservedObject var model: CompanionModel
     let ame: HerdrAgent?
     let store: HerdrStore
+    /// True while the sidebar shows Spaces only: the box is out of sight, so messages count as unread.
+    var isHidden = false
     @Environment(\.controlActiveState) private var controlActiveState
     @AppStorage(CompanionPreferences.jineCollapsedKey) private var collapsed = false
     @State private var draft = ""
@@ -428,6 +430,7 @@ struct CompanionJineBox: View {
                 }
             }
             .onChange(of: collapsed) { _, _ in reportVisibility() }
+            .onChange(of: isHidden) { _, _ in reportVisibility() }
             .onChange(of: controlActiveState) { _, _ in reportVisibility() }
             .onAppear { reportVisibility() }
             .onDisappear { model.setJineVisible(false) }
@@ -435,7 +438,7 @@ struct CompanionJineBox: View {
     }
 
     private func reportVisibility() {
-        model.setJineVisible(!collapsed && controlActiveState == .key)
+        model.setJineVisible(!isHidden && !collapsed && controlActiveState == .key)
     }
 
     private var messagePanel: some View {
@@ -583,6 +586,9 @@ struct CompanionPanel: View {
     let workspaceID: String?
     /// The sidebar's width.
     let width: CGFloat
+    /// Spaces-only mode: the room and the chat take no space and cannot be reached, but stay alive
+    /// so her model, the JINE polling and the unread count keep running.
+    var spacesOnly = false
     @StateObject private var model = CompanionModel()
 
     var body: some View {
@@ -594,11 +600,26 @@ struct CompanionPanel: View {
                 VStack(spacing: 6) {
                     CompanionView(model: model, commander: commander, ame: ame, store: store,
                                   registeredSessionIDs: Set(agents.compactMap(\.agentSessionID)), width: width - 14)
-                    CompanionJineBox(model: model, ame: ame, store: store)
+                    CompanionJineBox(model: model, ame: ame, store: store, isHidden: spacesOnly)
                 }
                 .padding(7)
                 Divider()
             }
+            .frame(height: spacesOnly ? 0 : nil, alignment: .top)
+            .clipped()
+            .opacity(spacesOnly ? 0 : 1)
+            .allowsHitTesting(!spacesOnly)
+            .accessibilityHidden(spacesOnly)
         }
     }
+}
+
+/// How the right sidebar is laid out: the room and chat on top, then Spaces, or Spaces alone.
+enum RightSidebarLayout {
+    static let spacesOnlyKey = "sidebarSpacesOnly"
+
+    static func showsCompanion(spacesOnly: Bool) -> Bool { !spacesOnly }
+
+    /// Spaces-only gives the Spaces list all the height the panels below it leave over.
+    static func spacesFillsSidebar(spacesOnly: Bool) -> Bool { spacesOnly }
 }

@@ -2065,4 +2065,12 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(size.width, 279 * 0.5, accuracy: 0.001)
         XCTAssertEqual(CompanionHeartsCrop.drawSize(cropSize: rect.size, roomHeight: 0), .zero)
     }
+
+    func testSpacesOnlyHidesTheCompanionAndFillsWithSpaces() {
+        XCTAssertEqual(RightSidebarLayout.spacesOnlyKey, "sidebarSpacesOnly")
+        XCTAssertTrue(RightSidebarLayout.showsCompanion(spacesOnly: false))
+        XCTAssertFalse(RightSidebarLayout.showsCompanion(spacesOnly: true))
+        XCTAssertFalse(RightSidebarLayout.spacesFillsSidebar(spacesOnly: false))
+        XCTAssertTrue(RightSidebarLayout.spacesFillsSidebar(spacesOnly: true))
+    }
 }

@@ -51,6 +51,7 @@ private struct WoolooCommands: Commands {
     @AppStorage(EditorLineWrapping.storageKey) private var wrapsLines = false
     @AppStorage("filesSidebarShowsExplorer") private var showsExplorer = false
     @AppStorage("filesSidebarShowsGitHub") private var showsGitHub = false
+    @AppStorage(RightSidebarLayout.spacesOnlyKey) private var spacesOnly = false
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
@@ -102,6 +103,7 @@ private struct WoolooCommands: Commands {
                  title: context?.showsFilesSidebar == false ? "Show Files and Changes" : "Hide Files and Changes")
             item("toggle_file_explorer", title: showsExplorer ? "Hide File Explorer" : "Show File Explorer")
             item("toggle_github", title: showsGitHub ? "Hide GitHub" : "Show GitHub")
+            item("toggle_spaces_only", title: spacesOnly ? "Show Ame-chan and JINE" : "Show Spaces Only")
             item("refresh_files")
             Divider()
             toggle("toggle_wrap_lines", title: "Wrap Lines", isOn: wrapsLines)

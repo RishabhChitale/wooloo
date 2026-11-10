@@ -281,6 +281,9 @@ struct ContentCommands {
         case .toggleGitHub:
             let defaults = UserDefaults.standard
             defaults.set(!defaults.bool(forKey: "filesSidebarShowsGitHub"), forKey: "filesSidebarShowsGitHub")
+        case .toggleSpacesOnly:
+            let defaults = UserDefaults.standard
+            defaults.set(!defaults.bool(forKey: RightSidebarLayout.spacesOnlyKey), forKey: RightSidebarLayout.spacesOnlyKey)
         case .toggleWrapLines: effects.toggleLineWrapping()
         case .refreshFiles:
             effects.forgetRecentFileResults()
