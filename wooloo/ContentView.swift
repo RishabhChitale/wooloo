@@ -482,8 +482,8 @@ private struct DestinationContentView: View {
             HStack(spacing: 0) {
                 if spacesToggle {
                     Button { spacesOnly.toggle() } label: {
-                        sectionTitle("SPACES", icon: "square.stack")
-                            .foregroundStyle(spacesOnly ? theme.accent : Color.secondary)
+                        sectionTitle("SPACES", icon: "square.stack", tint: spacesOnly ? theme.accent : nil)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help(spacesOnly ? "Show Ame-chan and JINE" : "Show only Spaces")
@@ -1727,7 +1727,7 @@ private struct DestinationContentView: View {
     }
 
     /// Matches the EXPLORER and GITHUB headers of the files sidebar.
-    private func sectionTitle(_ title: String, icon: String) -> some View {
+    private func sectionTitle(_ title: String, icon: String, tint: Color? = nil) -> some View {
         HStack(spacing: 8) {
             Text(title)
                 .font(.system(size: typography.secondary, weight: .semibold))
@@ -1735,7 +1735,7 @@ private struct DestinationContentView: View {
             Image(systemName: icon)
                 .font(.system(size: typography.secondary))
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(tint ?? Color.secondary)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
     }
