@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D02300000000000000000001 /* HerdrConnectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D02300000000000000000002 /* HerdrConnectionsView.swift */; };
+		D02200000000000000000001 /* HerdrConnections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D02200000000000000000002 /* HerdrConnections.swift */; };
 		DA6400000000000000000001 /* SpaceDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA6400000000000000000002 /* SpaceDrag.swift */; };
 		D02100000000000000000001 /* HerdrDestinations.swift in Sources */ = {isa = PBXBuildFile; fileRef = D02100000000000000000002 /* HerdrDestinations.swift */; };
 		F18000000000000000000003 /* EditorStructureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18000000000000000000004 /* EditorStructureTests.swift */; };
@@ -14,6 +16,7 @@
 		AFE300000000000000000000 /* HerdrRemoteBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFE300000000000000000001 /* HerdrRemoteBridgeTests.swift */; };
 		B63000000000000000000001 /* WorkspaceDiskComparisonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B63000000000000000000002 /* WorkspaceDiskComparisonView.swift */; };
 		B90000000000000000000001 /* HerdrRemoteBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000002 /* HerdrRemoteBridge.swift */; };
+		D41100000000000000000001 /* NotebookEditableBenchmarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = D41100000000000000000002 /* NotebookEditableBenchmarks.swift */; };
 		D40000000000000000000003 /* NotebookPreviewBenchmarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000004 /* NotebookPreviewBenchmarks.swift */; };
 		D40000000000000000000001 /* MarkdownTableBenchmarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000002 /* MarkdownTableBenchmarks.swift */; };
 		C3000000000000000000B101 /* HerdrRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3000000000000000000B102 /* HerdrRuntimeTests.swift */; };
@@ -182,6 +185,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		D02300000000000000000002 /* HerdrConnectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrConnectionsView.swift; sourceTree = "<group>"; };
+		D02200000000000000000002 /* HerdrConnections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrConnections.swift; sourceTree = "<group>"; };
 		DA6400000000000000000002 /* SpaceDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceDrag.swift; sourceTree = "<group>"; };
 		D02100000000000000000002 /* HerdrDestinations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrDestinations.swift; sourceTree = "<group>"; };
 		F18000000000000000000004 /* EditorStructureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorStructureTests.swift; sourceTree = "<group>"; };
@@ -189,6 +194,7 @@
 		AFE300000000000000000001 /* HerdrRemoteBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrRemoteBridgeTests.swift; sourceTree = "<group>"; };
 		B63000000000000000000002 /* WorkspaceDiskComparisonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDiskComparisonView.swift; sourceTree = "<group>"; };
 		B90000000000000000000002 /* HerdrRemoteBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrRemoteBridge.swift; sourceTree = "<group>"; };
+		D41100000000000000000002 /* NotebookEditableBenchmarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookEditableBenchmarks.swift; sourceTree = "<group>"; };
 		D40000000000000000000004 /* NotebookPreviewBenchmarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookPreviewBenchmarks.swift; sourceTree = "<group>"; };
 		D40000000000000000000002 /* MarkdownTableBenchmarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTableBenchmarks.swift; sourceTree = "<group>"; };
 		C3000000000000000000B102 /* HerdrRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrRuntimeTests.swift; sourceTree = "<group>"; };
@@ -369,6 +375,8 @@
 				C30000000000000000000071 /* HerdrSettingsModel.swift */,
 				A10000000000000000000015 /* HerdrConnection.swift */,
 				D02100000000000000000002 /* HerdrDestinations.swift */,
+				D02300000000000000000002 /* HerdrConnectionsView.swift */,
+				D02200000000000000000002 /* HerdrConnections.swift */,
 				DA6400000000000000000002 /* SpaceDrag.swift */,
 				B90000000000000000000002 /* HerdrRemoteBridge.swift */,
 				A10000000000000000000017 /* TerminalPaneView.swift */,
@@ -468,6 +476,7 @@
 				B20000000000000000000013 /* TerminalRenderHarness.swift */,
 				B20000000000000000000014 /* TerminalRenderingTests.swift */,
 				D40000000000000000000002 /* MarkdownTableBenchmarks.swift */,
+				D41100000000000000000002 /* NotebookEditableBenchmarks.swift */,
 				D40000000000000000000004 /* NotebookPreviewBenchmarks.swift */,
 				B20000000000000000000015 /* TerminalPipelineBenchmarks.swift */,
 				B20000000000000000000016 /* WorkspaceFilesBenchmarks.swift */,
@@ -676,6 +685,8 @@
 				C30000000000000000000070 /* HerdrSettingsModel.swift in Sources */,
 				A10000000000000000000014 /* HerdrConnection.swift in Sources */,
 				D02100000000000000000001 /* HerdrDestinations.swift in Sources */,
+				D02300000000000000000001 /* HerdrConnectionsView.swift in Sources */,
+				D02200000000000000000001 /* HerdrConnections.swift in Sources */,
 				DA6400000000000000000001 /* SpaceDrag.swift in Sources */,
 				B90000000000000000000001 /* HerdrRemoteBridge.swift in Sources */,
 				A10000000000000000000016 /* TerminalPaneView.swift in Sources */,
@@ -763,6 +774,7 @@
 				B20000000000000000000023 /* TerminalRenderHarness.swift in Sources */,
 				B20000000000000000000024 /* TerminalRenderingTests.swift in Sources */,
 				D40000000000000000000001 /* MarkdownTableBenchmarks.swift in Sources */,
+				D41100000000000000000001 /* NotebookEditableBenchmarks.swift in Sources */,
 				D40000000000000000000003 /* NotebookPreviewBenchmarks.swift in Sources */,
 				B20000000000000000000025 /* TerminalPipelineBenchmarks.swift in Sources */,
 				B20000000000000000000026 /* WorkspaceFilesBenchmarks.swift in Sources */,
@@ -907,7 +919,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.16.22;
+				MARKETING_VERSION = 0.3.17.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(WOOLOO_APP_BUNDLE_IDENTIFIER)";
 				WOOLOO_APP_BUNDLE_IDENTIFIER = dev.wooloo.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -928,7 +940,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.16.22;
+				MARKETING_VERSION = 0.3.17.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(WOOLOO_APP_BUNDLE_IDENTIFIER)";
 				WOOLOO_APP_BUNDLE_IDENTIFIER = dev.wooloo.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
