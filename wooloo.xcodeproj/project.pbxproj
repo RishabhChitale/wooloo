@@ -62,6 +62,8 @@
 		C3000000000000000000005A /* WorkspaceExplorerTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3000000000000000000005B /* WorkspaceExplorerTree.swift */; };
 		C30000000000000000000054 /* WorkspaceDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000055 /* WorkspaceDocumentStore.swift */; };
 		A10000000000000000000054 /* HerdrNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000055 /* HerdrNotifications.swift */; };
+		A1000000000000000000F001 /* SpaceProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F002 /* SpaceProgress.swift */; };
+		A1000000000000000000F003 /* SpaceProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F004 /* SpaceProgressTests.swift */; };
 		A10000000000000000000056 /* WoolooTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000057 /* WoolooTypography.swift */; };
 		A10000000000000000000058 /* WorkspaceDiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000059 /* WorkspaceDiffView.swift */; };
 		A100000000000000000000E0 /* EditorLineChanges.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000E1 /* EditorLineChanges.swift */; };
@@ -235,6 +237,8 @@
 		C3000000000000000000005B /* WorkspaceExplorerTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceExplorerTree.swift; sourceTree = "<group>"; };
 		C30000000000000000000055 /* WorkspaceDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDocumentStore.swift; sourceTree = "<group>"; };
 		A10000000000000000000055 /* HerdrNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HerdrNotifications.swift; sourceTree = "<group>"; };
+		A1000000000000000000F002 /* SpaceProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceProgress.swift; sourceTree = "<group>"; };
+		A1000000000000000000F004 /* SpaceProgressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceProgressTests.swift; sourceTree = "<group>"; };
 		A10000000000000000000057 /* WoolooTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WoolooTypography.swift; sourceTree = "<group>"; };
 		A10000000000000000000059 /* WorkspaceDiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDiffView.swift; sourceTree = "<group>"; };
 		A100000000000000000000E1 /* EditorLineChanges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorLineChanges.swift; sourceTree = "<group>"; };
@@ -411,6 +415,7 @@
 				C30000000000000000000055 /* WorkspaceDocumentStore.swift */,
 				A1000000000000000000AF02 /* WorkspaceSessionPersistence.swift */,
 				A10000000000000000000055 /* HerdrNotifications.swift */,
+				A1000000000000000000F002 /* SpaceProgress.swift */,
 				A10000000000000000000057 /* WoolooTypography.swift */,
 				A10000000000000000000059 /* WorkspaceDiffView.swift */,
 				B63000000000000000000002 /* WorkspaceDiskComparisonView.swift */,
@@ -506,6 +511,7 @@
 				C30000000000000000000045 /* HerdrSurfaceStreamTests.swift */,
 				C3000000000000000000AC02 /* HerdrAgentViewTests.swift */,
 				C30000000000000000000047 /* HerdrNotificationTests.swift */,
+				A1000000000000000000F004 /* SpaceProgressTests.swift */,
 				AFE300000000000000000001 /* HerdrRemoteBridgeTests.swift */,
 				C30000000000000000000049 /* HerdrStoreTests.swift */,
 				C300000000000000000000F1 /* TerminalTabDropTests.swift */,
@@ -715,6 +721,7 @@
 				C30000000000000000000054 /* WorkspaceDocumentStore.swift in Sources */,
 				A1000000000000000000AF01 /* WorkspaceSessionPersistence.swift in Sources */,
 				A10000000000000000000054 /* HerdrNotifications.swift in Sources */,
+				A1000000000000000000F001 /* SpaceProgress.swift in Sources */,
 				A10000000000000000000056 /* WoolooTypography.swift in Sources */,
 				A10000000000000000000058 /* WorkspaceDiffView.swift in Sources */,
 				B63000000000000000000001 /* WorkspaceDiskComparisonView.swift in Sources */,
@@ -799,6 +806,7 @@
 				C30000000000000000000044 /* HerdrSurfaceStreamTests.swift in Sources */,
 				C3000000000000000000AC01 /* HerdrAgentViewTests.swift in Sources */,
 				C30000000000000000000046 /* HerdrNotificationTests.swift in Sources */,
+				A1000000000000000000F003 /* SpaceProgressTests.swift in Sources */,
 				AFE300000000000000000000 /* HerdrRemoteBridgeTests.swift in Sources */,
 				C30000000000000000000048 /* HerdrStoreTests.swift in Sources */,
 				C300000000000000000000F0 /* TerminalTabDropTests.swift in Sources */,
@@ -899,7 +907,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.16.20;
+				MARKETING_VERSION = 0.3.16.21;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(WOOLOO_APP_BUNDLE_IDENTIFIER)";
 				WOOLOO_APP_BUNDLE_IDENTIFIER = dev.wooloo.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -920,7 +928,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.16.20;
+				MARKETING_VERSION = 0.3.16.21;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(WOOLOO_APP_BUNDLE_IDENTIFIER)";
 				WOOLOO_APP_BUNDLE_IDENTIFIER = dev.wooloo.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";

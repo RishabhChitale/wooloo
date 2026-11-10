@@ -380,11 +380,21 @@ struct HerdrDestinationSection: View {
     let rename: (HerdrWorkspace) -> Void
     let close: (HerdrWorkspace) -> Void
     @State private var collapsed = false
+    @ObservedObject private var unitProgress = UnitProgressMonitor.shared
     @Environment(\.woolooTheme) private var theme
     @Environment(\.woolooTypography) private var typography
 
+    private func pillSummary(for space: HerdrWorkspace) -> SpacePillSummary {
+        let agents = ((store.snapshot ?? store.cachedSnapshot)?.agents ?? []).filter { $0.workspaceID == space.workspaceID }
+        let unreadDone = Set(agents.filter { notifier.attention(for: $0.paneID, contextID: store.contextID) == .done }.map(\.paneID))
+        return SpacePillSummary.make(
+            agents: agents.map { SpaceAgent(name: $0.name ?? "", paneID: $0.paneID, status: $0.agentStatus) },
+            files: unitProgress.files, unreadDone: unreadDone, now: Date().timeIntervalSince1970)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
+            Color.clear.frame(height: 0).onAppear { unitProgress.start() }
             if grouped {
                 HStack(spacing: 4) {
                     Button { collapsed.toggle() } label: {
@@ -423,7 +433,9 @@ struct HerdrDestinationSection: View {
                     }
                 }
                 ForEach((store.snapshot ?? store.cachedSnapshot)?.workspaces ?? []) { space in
+                    let pills = pillSummary(for: space)
                     Button { select(space.workspaceID) } label: {
+                        VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 7) {
                             AgentStatusDot(status: space.agentStatus)
                             Text(space.label).lineLimit(1)
@@ -436,19 +448,27 @@ struct HerdrDestinationSection: View {
                                 .font(.system(size: typography.secondary)).monospacedDigit()
                                 .foregroundStyle(.secondary).fixedSize()
                             }
-                            let marks = notifier.attentionCount(inWorkspace: space.workspaceID,
-                                snapshot: store.snapshot ?? store.cachedSnapshot, contextID: store.contextID)
-                            HerdrAttentionBadge(requests: marks.requests, done: marks.done)
+                            if !pills.isUnitSpace {
+                                let marks = notifier.attentionCount(inWorkspace: space.workspaceID,
+                                    snapshot: store.snapshot ?? store.cachedSnapshot, contextID: store.contextID)
+                                HerdrAttentionBadge(requests: marks.requests, done: marks.done)
+                            }
+                        }
+                        if pills.isUnitSpace, pills.hasPills { SpacePillsView(summary: pills) }
                         }
                         .font(.system(size: typography.emphasis, weight: .medium))
                         .sidebarRow(selected: active && store.selectedWorkspaceID == space.workspaceID)
+                        .overlay(alignment: .bottom) {
+                            if pills.working > 0 { SpaceProgressBar(percent: pills.workingPercent).padding(.horizontal, 8).padding(.bottom, 1) }
+                        }
                         .opacity(store.isConnected ? 1 : 0.5)
                     }
                     .buttonStyle(.plain)
                     .onDrag { spaceDrag.begin(space.workspaceID, store: store) }
                     .modifier(SpaceDropModifier(store: store, spaces: spaceDrag, tabs: tabDrag, workspaceID: space.workspaceID))
                     .help(tabDrag.draggedTerminalTab.flatMap { store.tabSpaceMoveRefusal($0, to: space.workspaceID) }
-                          ?? "Drag to reorder Spaces, or drop a terminal tab to move it here")
+                          ?? ("Drag to reorder Spaces, or drop a terminal tab to move it here"
+                              + (pills.isUnitSpace ? "\n\n" + SpacePillsView.legend : "")))
                     .contextMenu {
                         Button("New Tab in Space", systemImage: "plus") {
                             select(space.workspaceID)
