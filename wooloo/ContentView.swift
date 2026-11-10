@@ -480,19 +480,18 @@ private struct DestinationContentView: View {
     private func spacesSection(spacesToggle: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 0) {
-                sectionTitle("SPACES", icon: "square.stack")
-                Spacer()
                 if spacesToggle {
                     Button { spacesOnly.toggle() } label: {
-                        Image(systemName: "square.stack")
-                            .font(.system(size: typography.secondary, weight: .semibold))
+                        sectionTitle("SPACES", icon: "square.stack")
                             .foregroundStyle(spacesOnly ? theme.accent : Color.secondary)
-                            .frame(width: 23, height: typography.metric(20))
                     }
                     .buttonStyle(.plain)
                     .help(spacesOnly ? "Show Ame-chan and JINE" : "Show only Spaces")
                     .accessibilityIdentifier("toggle-spaces-only")
+                } else {
+                    sectionTitle("SPACES", icon: "square.stack")
                 }
+                Spacer()
                 Button {
                     activeDocumentID = nil
                     destinations.createSpace(on: herdr)
