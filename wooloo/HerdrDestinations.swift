@@ -523,6 +523,8 @@ struct HerdrDestinationSection: View {
     let rename: (HerdrWorkspace) -> Void
     let close: (HerdrWorkspace) -> Void
     @State private var collapsed = false
+    @AppStorage(SpaceCategory.overridesKey) private var categoryOverridesRaw = ""
+    @AppStorage(SpaceCategory.collapsedKey) private var collapsedCategoriesRaw = ""
     @ObservedObject private var unitProgress = UnitProgressMonitor.shared
     @Environment(\.woolooTheme) private var theme
     @Environment(\.woolooTypography) private var typography
@@ -582,59 +584,14 @@ struct HerdrDestinationSection: View {
                             .font(.caption).disabled(!store.destinationEnabled)
                     }
                 }
-                ForEach((store.snapshot ?? store.cachedSnapshot)?.workspaces ?? []) { space in
-                    let pills = pillSummary(for: space)
-                    Button { select(space.workspaceID) } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 7) {
-                            AgentStatusDot(status: space.agentStatus)
-                            Text(space.label).lineLimit(1)
-                            Spacer(minLength: 0)
-                            if let git = store.workspaceGitStatuses[space.workspaceID] {
-                                HStack(spacing: 4) {
-                                    if git.ahead > 0 { Text("↑\(git.ahead)") }
-                                    if git.behind > 0 { Text("↓\(git.behind)") }
-                                }
-                                .font(.system(size: typography.secondary)).monospacedDigit()
-                                .foregroundStyle(.secondary).fixedSize()
-                            }
-                            if !pills.isUnitSpace {
-                                let marks = notifier.attentionCount(inWorkspace: space.workspaceID,
-                                    snapshot: store.snapshot ?? store.cachedSnapshot, contextID: store.contextID)
-                                HerdrAttentionBadge(requests: marks.requests, done: marks.done)
-                            }
-                        }
-                        if pills.isUnitSpace, pills.hasPills { SpacePillsView(summary: pills) }
-                        }
-                        .font(.system(size: typography.emphasis, weight: .medium))
-                        .sidebarRow(selected: active && store.selectedWorkspaceID == space.workspaceID)
-                        .overlay(alignment: .bottom) {
-                            if pills.working > 0 { SpaceProgressBar(percent: pills.workingPercent).padding(.horizontal, 8).padding(.bottom, 1) }
-                        }
-                        .opacity(store.isConnected ? 1 : 0.5)
-                    }
-                    .buttonStyle(.plain)
-                    .onDrag { spaceDrag.begin(space.workspaceID, store: store) }
-                    .modifier(SpaceDropModifier(store: store, spaces: spaceDrag, tabs: tabDrag, workspaceID: space.workspaceID))
-                    .help(tabDrag.draggedTerminalTab.flatMap { store.tabSpaceMoveRefusal($0, to: space.workspaceID) }
-                          ?? ("Drag to reorder Spaces, or drop a terminal tab to move it here"
-                              + (pills.isUnitSpace ? "\n\n" + SpacePillsView.legend : "")))
-                    .contextMenu {
-                        Button("New Tab in Space", systemImage: "plus") {
-                            select(space.workspaceID)
-                            store.createTab()
-                        }.disabled(!store.isConnected)
-                        Button("Rename Space…", systemImage: "pencil") { rename(space) }
-                            .disabled(!store.isConnected)
-                        if let snapshot = store.snapshot,
-                           let location = WorkspaceFiles.location(snapshot: snapshot, workspaceID: space.workspaceID,
-                               session: store.sessionName, machine: store.machine) {
-                            Button("Copy Path", systemImage: "doc.on.doc") { AppActions.copy(location.root) }
-                            if location.isLocal {
-                                Button("Reveal in Finder", systemImage: "folder") { AppActions.reveal(location.root) }
-                            }
-                        }
-                        Button("Close Space…", systemImage: "xmark", role: .destructive) { close(space) }.disabled(!store.isConnected)
+                let overrides = SpaceCategory.decodeOverrides(categoryOverridesRaw)
+                let hiddenCategories = SpaceCategory.decodeCollapsed(collapsedCategoriesRaw)
+                ForEach(SpaceCategory.grouped((store.snapshot ?? store.cachedSnapshot)?.workspaces ?? [], overrides: overrides)) { group in
+                    let isHidden = hiddenCategories.contains(group.category)
+                    categoryHeader(group, isCollapsed: isHidden)
+                    // A collapsed group still shows the selected Space, so the current row never disappears.
+                    ForEach(isHidden ? group.spaces.filter { active && store.selectedWorkspaceID == $0.workspaceID } : group.spaces) { space in
+                        spaceRow(space, overrides: overrides)
                     }
                 }
                 if tabDrag.isDraggingTerminalTab,
@@ -658,4 +615,184 @@ struct HerdrDestinationSection: View {
         .onChange(of: active) { _, active in if active { collapsed = false } }
         .onChange(of: store.selectedWorkspaceID) { _, _ in if active { collapsed = false } }
     }
+
+    /// Small collapsible heading above each project group.
+    private func categoryHeader(_ group: SpaceCategoryGroup, isCollapsed: Bool) -> some View {
+        Button {
+            collapsedCategoriesRaw = SpaceCategory.toggling(group.category, in: collapsedCategoriesRaw)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .imageScale(.small)
+                Text(group.category.title.uppercased())
+                Text("\(group.spaces.count)").foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: typography.secondary, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.top, 6)
+            .padding(.bottom, 1)
+            .padding(.horizontal, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(isCollapsed ? "Show \(group.category.title)" : "Hide \(group.category.title)")
+        .accessibilityIdentifier("space-category-\(group.category.rawValue)")
+    }
+
+    /// Pins a Space to a category; nil (or the automatic choice) clears the pin.
+    private func setCategory(_ category: SpaceCategory?, for space: HerdrWorkspace) {
+        categoryOverridesRaw = SpaceCategory.setting(category, for: space.label, in: categoryOverridesRaw)
+    }
+
+    /// One Space row: status, label, Git counts, attention marks, pills, drag and drop, context menu.
+    @ViewBuilder
+    private func spaceRow(_ space: HerdrWorkspace, overrides: [String: SpaceCategory]) -> some View {
+        let pills = pillSummary(for: space)
+        Button { select(space.workspaceID) } label: {
+            VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 7) {
+                AgentStatusDot(status: space.agentStatus)
+                Text(space.label).lineLimit(1)
+                Spacer(minLength: 0)
+                if let git = store.workspaceGitStatuses[space.workspaceID] {
+                    HStack(spacing: 4) {
+                        if git.ahead > 0 { Text("↑\(git.ahead)") }
+                        if git.behind > 0 { Text("↓\(git.behind)") }
+                    }
+                    .font(.system(size: typography.secondary)).monospacedDigit()
+                    .foregroundStyle(.secondary).fixedSize()
+                }
+                if !pills.isUnitSpace {
+                    let marks = notifier.attentionCount(inWorkspace: space.workspaceID,
+                        snapshot: store.snapshot ?? store.cachedSnapshot, contextID: store.contextID)
+                    HerdrAttentionBadge(requests: marks.requests, done: marks.done)
+                }
+            }
+            if pills.isUnitSpace, pills.hasPills { SpacePillsView(summary: pills) }
+            }
+            .font(.system(size: typography.emphasis, weight: .medium))
+            .sidebarRow(selected: active && store.selectedWorkspaceID == space.workspaceID)
+            .overlay(alignment: .bottom) {
+                if pills.working > 0 { SpaceProgressBar(percent: pills.workingPercent).padding(.horizontal, 8).padding(.bottom, 1) }
+            }
+            .opacity(store.isConnected ? 1 : 0.5)
+        }
+        .buttonStyle(.plain)
+        .onDrag { spaceDrag.begin(space.workspaceID, store: store) }
+        .modifier(SpaceDropModifier(store: store, spaces: spaceDrag, tabs: tabDrag, workspaceID: space.workspaceID))
+        .help(tabDrag.draggedTerminalTab.flatMap { store.tabSpaceMoveRefusal($0, to: space.workspaceID) }
+              ?? ("Drag to reorder Spaces, or drop a terminal tab to move it here"
+                  + (pills.isUnitSpace ? "\n\n" + SpacePillsView.legend : "")))
+        .contextMenu {
+            Button("New Tab in Space", systemImage: "plus") {
+                select(space.workspaceID)
+                store.createTab()
+            }.disabled(!store.isConnected)
+            Button("Rename Space…", systemImage: "pencil") { rename(space) }
+                .disabled(!store.isConnected)
+            if let snapshot = store.snapshot,
+               let location = WorkspaceFiles.location(snapshot: snapshot, workspaceID: space.workspaceID,
+                   session: store.sessionName, machine: store.machine) {
+                Button("Copy Path", systemImage: "doc.on.doc") { AppActions.copy(location.root) }
+                if location.isLocal {
+                    Button("Reveal in Finder", systemImage: "folder") { AppActions.reveal(location.root) }
+                }
+            }
+            Menu {
+                ForEach(SpaceCategory.allCases, id: \.self) { category in
+                    Button { setCategory(category, for: space) } label: {
+                        if SpaceCategory.category(for: space.label, overrides: overrides) == category {
+                            Label(category.title, systemImage: "checkmark")
+                        } else {
+                            Text(category.title)
+                        }
+                    }
+                }
+                Divider()
+                Button("Automatic (\(SpaceCategory.automatic(for: space.label).title))") { setCategory(nil, for: space) }
+            } label: {
+                Label("Category", systemImage: "folder")
+            }
+            Button("Close Space…", systemImage: "xmark", role: .destructive) { close(space) }.disabled(!store.isConnected)
+        }
+    }
+}
+
+
+/// Project groups in the Spaces list, shown in this order. A Space is placed by keywords in its label
+/// unless it was pinned to a group from its context menu (pins are keyed by the lowercased label).
+enum SpaceCategory: String, CaseIterable, Codable, Identifiable {
+    case claude, creative, finance, misc
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .claude: "Claude Optimization"
+        case .creative: "Creative Projects"
+        case .finance: "Finance"
+        case .misc: "Miscellaneous"
+        }
+    }
+
+    static let overridesKey = "spaceCategoryOverrides"
+    static let collapsedKey = "spaceCategoryCollapsed"
+
+    /// Checked in this order; a keyword matches the start of any word in the label.
+    static let keywords: [(SpaceCategory, [String])] = [
+        (.claude, ["claude", "skill", "rishabh"]),
+        (.finance, ["option", "trading", "trade", "finance", "financial", "budget", "invest", "stock", "money",
+                    "tax", "crypto", "portfolio"]),
+        (.creative, ["playbox", "superintel", "crushon", "bpm", "upscayl", "video", "amv", "marquee", "music",
+                     "design", "film", "photo", "anime", "art", "creative"]),
+    ]
+
+    static func automatic(for label: String) -> SpaceCategory {
+        let words = label.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        for (category, keys) in keywords where keys.contains(where: { key in words.contains { $0.hasPrefix(key) } }) {
+            return category
+        }
+        return .misc
+    }
+
+    static func category(for label: String, overrides: [String: SpaceCategory]) -> SpaceCategory {
+        overrides[label.lowercased()] ?? automatic(for: label)
+    }
+
+    /// Non-empty groups in category order; each keeps Herdr's Space order.
+    static func grouped(_ spaces: [HerdrWorkspace], overrides: [String: SpaceCategory]) -> [SpaceCategoryGroup] {
+        let buckets = Dictionary(grouping: spaces) { category(for: $0.label, overrides: overrides) }
+        return allCases.compactMap { category in buckets[category].map { SpaceCategoryGroup(category: category, spaces: $0) } }
+    }
+
+    static func decodeOverrides(_ raw: String) -> [String: SpaceCategory] {
+        guard let data = raw.data(using: .utf8),
+              let map = try? JSONDecoder().decode([String: SpaceCategory].self, from: data) else { return [:] }
+        return map
+    }
+
+    static func setting(_ category: SpaceCategory?, for label: String, in raw: String) -> String {
+        var map = decodeOverrides(raw)
+        let key = label.lowercased()
+        if let category, category != automatic(for: label) { map[key] = category } else { map[key] = nil }
+        guard !map.isEmpty, let data = try? JSONEncoder().encode(map) else { return "" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    static func decodeCollapsed(_ raw: String) -> Set<SpaceCategory> {
+        Set(raw.split(separator: ",").compactMap { SpaceCategory(rawValue: String($0)) })
+    }
+
+    static func toggling(_ category: SpaceCategory, in raw: String) -> String {
+        var set = decodeCollapsed(raw)
+        if set.contains(category) { set.remove(category) } else { set.insert(category) }
+        return allCases.filter(set.contains).map(\.rawValue).joined(separator: ",")
+    }
+}
+
+struct SpaceCategoryGroup: Identifiable {
+    let category: SpaceCategory
+    let spaces: [HerdrWorkspace]
+    var id: SpaceCategory { category }
 }

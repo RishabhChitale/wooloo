@@ -56,3 +56,56 @@ final class SpaceProgressTests: XCTestCase {
         XCTAssertEqual(s.waiting, 2)
     }
 }
+
+final class SpaceCategoryTests: XCTestCase {
+    private func space(_ id: String, _ label: String) -> HerdrWorkspace {
+        HerdrWorkspace(workspaceID: id, label: label, agentStatus: nil, activeTabID: nil, worktree: nil)
+    }
+
+    func testAutomaticCategoriesForCurrentSpaces() {
+        let expected: [String: SpaceCategory] = [
+            "Rishabh": .claude, "Claude Skill Testing": .claude,
+            "Playbox-server": .creative, "SuperIntellegence": .creative, "BPM Checker app": .creative,
+            "Upscayl Fork": .creative, "Smart Video Library": .creative,
+            "options-trading": .finance, "Finance deep dive": .finance, "Budgeting": .finance, "Investing": .finance,
+            "Learn Canto": .misc,
+        ]
+        for (label, category) in expected {
+            XCTAssertEqual(SpaceCategory.automatic(for: label), category, label)
+        }
+    }
+
+    func testKeywordsMatchWordStartsOnly() {
+        XCTAssertEqual(SpaceCategory.automatic(for: "Restart scripts"), .misc)   // "art" inside a word does not count
+        XCTAssertEqual(SpaceCategory.automatic(for: "art board"), .creative)
+    }
+
+    func testGroupsInOrderAndKeepSpaceOrder() {
+        let spaces = [space("w1", "Learn Canto"), space("w2", "options-trading"), space("w3", "Playbox-server"),
+                      space("w4", "Rishabh"), space("w5", "Upscayl Fork"), space("w6", "Claude Skill Testing")]
+        let groups = SpaceCategory.grouped(spaces, overrides: [:])
+        XCTAssertEqual(groups.map(\.category), [.claude, .creative, .finance, .misc])
+        XCTAssertEqual(groups[0].spaces.map(\.workspaceID), ["w4", "w6"])
+        XCTAssertEqual(groups[1].spaces.map(\.workspaceID), ["w3", "w5"])
+    }
+
+    func testOverridesPinAndClear() {
+        var raw = SpaceCategory.setting(.finance, for: "Learn Canto", in: "")
+        XCTAssertEqual(SpaceCategory.category(for: "learn canto", overrides: SpaceCategory.decodeOverrides(raw)), .finance)
+        raw = SpaceCategory.setting(.misc, for: "Learn Canto", in: raw)      // same as automatic: pin removed
+        XCTAssertEqual(raw, "")
+        raw = SpaceCategory.setting(.creative, for: "Learn Canto", in: raw)
+        raw = SpaceCategory.setting(nil, for: "Learn Canto", in: raw)
+        XCTAssertEqual(SpaceCategory.decodeOverrides(raw), [:])
+        XCTAssertEqual(SpaceCategory.decodeOverrides("not json"), [:])
+    }
+
+    func testCollapsedToggle() {
+        var raw = SpaceCategory.toggling(.finance, in: "")
+        raw = SpaceCategory.toggling(.claude, in: raw)
+        XCTAssertEqual(raw, "claude,finance")
+        XCTAssertEqual(SpaceCategory.decodeCollapsed(raw), [.claude, .finance])
+        XCTAssertEqual(SpaceCategory.toggling(.claude, in: raw), "finance")
+        XCTAssertEqual(SpaceCategory.decodeCollapsed("bogus,misc"), [.misc])
+    }
+}
