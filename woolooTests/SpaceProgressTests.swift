@@ -108,4 +108,14 @@ final class SpaceCategoryTests: XCTestCase {
         XCTAssertEqual(SpaceCategory.toggling(.claude, in: raw), "finance")
         XCTAssertEqual(SpaceCategory.decodeCollapsed("bogus,misc"), [.misc])
     }
+
+    func testCategoryColorsSetClearAndIgnoreJunk() {
+        var raw = SpaceCategoryColor.setting(.green, for: .finance, in: "")
+        raw = SpaceCategoryColor.setting(.blue, for: .claude, in: raw)
+        XCTAssertEqual(raw, "claude=blue,finance=green")
+        XCTAssertEqual(SpaceCategoryColor.decode(raw), [.claude: .blue, .finance: .green])
+        raw = SpaceCategoryColor.setting(nil, for: .claude, in: raw)
+        XCTAssertEqual(raw, "finance=green")
+        XCTAssertEqual(SpaceCategoryColor.decode("misc=chartreuse,bogus=red,creative=pink"), [.creative: .pink])
+    }
 }

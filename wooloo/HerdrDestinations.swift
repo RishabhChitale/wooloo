@@ -525,6 +525,7 @@ struct HerdrDestinationSection: View {
     @State private var collapsed = false
     @AppStorage(SpaceCategory.overridesKey) private var categoryOverridesRaw = ""
     @AppStorage(SpaceCategory.collapsedKey) private var collapsedCategoriesRaw = ""
+    @AppStorage(SpaceCategoryColor.key) private var categoryColorsRaw = ""
     @ObservedObject private var unitProgress = UnitProgressMonitor.shared
     @Environment(\.woolooTheme) private var theme
     @Environment(\.woolooTypography) private var typography
@@ -621,12 +622,17 @@ struct HerdrDestinationSection: View {
         Button {
             collapsedCategoriesRaw = SpaceCategory.toggling(group.category, in: collapsedCategoriesRaw)
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                    .imageScale(.small)
-                Text(group.category.title.uppercased())
-                Text("\(group.spaces.count)").foregroundStyle(.tertiary)
-                Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .imageScale(.small)
+                    Text(group.category.title.uppercased())
+                    Text("\(group.spaces.count)").foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                }
+                if let color = SpaceCategoryColor.decode(categoryColorsRaw)[group.category] {
+                    Capsule().fill(color.color).frame(height: 2)
+                }
             }
             .font(.system(size: typography.secondary, weight: .semibold))
             .foregroundStyle(.secondary)
@@ -638,6 +644,29 @@ struct HerdrDestinationSection: View {
         .buttonStyle(.plain)
         .help(isCollapsed ? "Show \(group.category.title)" : "Hide \(group.category.title)")
         .accessibilityIdentifier("space-category-\(group.category.rawValue)")
+        .contextMenu {
+            let current = SpaceCategoryColor.decode(categoryColorsRaw)[group.category]
+            Menu {
+                ForEach(SpaceCategoryColor.allCases) { option in
+                    Button {
+                        categoryColorsRaw = SpaceCategoryColor.setting(option, for: group.category, in: categoryColorsRaw)
+                    } label: {
+                        Label {
+                            Text(option == current ? "\(option.title)  ✓" : option.title)
+                        } icon: {
+                            Image(nsImage: SpaceCategoryColor.swatch(option.nsColor))
+                        }
+                    }
+                }
+                Divider()
+                Button("No Color") {
+                    categoryColorsRaw = SpaceCategoryColor.setting(nil, for: group.category, in: categoryColorsRaw)
+                }
+                .disabled(current == nil)
+            } label: {
+                Label("Color", systemImage: "paintpalette")
+            }
+        }
     }
 
     /// Pins a Space to a category; nil (or the automatic choice) clears the pin.
@@ -795,4 +824,61 @@ struct SpaceCategoryGroup: Identifiable {
     let category: SpaceCategory
     let spaces: [HerdrWorkspace]
     var id: SpaceCategory { category }
+}
+
+/// Optional colour per project group, drawn as a line under the group heading.
+/// Stored as "category=color" pairs, e.g. "claude=blue,finance=green".
+enum SpaceCategoryColor: String, CaseIterable, Identifiable {
+    case red, orange, yellow, green, teal, blue, purple, pink, gray
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+
+    var nsColor: NSColor {
+        switch self {
+        case .red: return .systemRed
+        case .orange: return .systemOrange
+        case .yellow: return .systemYellow
+        case .green: return .systemGreen
+        case .teal: return .systemTeal
+        case .blue: return .systemBlue
+        case .purple: return .systemPurple
+        case .pink: return .systemPink
+        case .gray: return .systemGray
+        }
+    }
+
+    var color: Color { Color(nsColor: nsColor) }
+
+    static let key = "spaceCategoryColors"
+
+    static func decode(_ raw: String) -> [SpaceCategory: SpaceCategoryColor] {
+        var map: [SpaceCategory: SpaceCategoryColor] = [:]
+        for pair in raw.split(separator: ",") {
+            let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
+            if parts.count == 2, let category = SpaceCategory(rawValue: parts[0]),
+               let color = SpaceCategoryColor(rawValue: parts[1]) {
+                map[category] = color
+            }
+        }
+        return map
+    }
+
+    static func setting(_ color: SpaceCategoryColor?, for category: SpaceCategory, in raw: String) -> String {
+        var map = decode(raw)
+        map[category] = color
+        return SpaceCategory.allCases.compactMap { c in map[c].map { "\(c.rawValue)=\($0.rawValue)" } }
+            .joined(separator: ",")
+    }
+
+    /// A filled circle for the colour menu; not a template image, so menus keep its colour.
+    static func swatch(_ color: NSColor) -> NSImage {
+        let image = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
 }
