@@ -119,4 +119,10 @@ final class SpaceCategoryTests: XCTestCase {
         XCTAssertEqual(raw, "finance=green")
         XCTAssertEqual(SpaceCategoryColor.decode("misc=chartreuse,bogus=red,creative=pink"), [.creative: .pink])
     }
+
+    func testUnitCategoriesSitUnderManualPins() {
+        let merged = SpaceCategory.merged(manual: ["learn canto": .creative],
+                                          unit: ["Learn Canto": "finance", "Options Lab": "school", "x": "bogus"])
+        XCTAssertEqual(merged, ["learn canto": .creative, "options lab": .school])
+    }
 }

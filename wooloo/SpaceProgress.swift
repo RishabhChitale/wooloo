@@ -20,6 +20,8 @@ struct UnitFiles: Equatable, Sendable {
     var askers: [String] = []
     /// Panes the strip last saw with a background shell running, with the time it saw them.
     var backgroundPanes: [String: TimeInterval] = [:]
+    /// Space categories set by commanders (unit-space-purpose.sh), keyed by lowercased Space label.
+    var spaceCategories: [String: String] = [:]
 }
 
 /// A Herdr agent reduced to what the pills need.
@@ -94,6 +96,8 @@ enum UnitFilesReader {
         let bg = "\(home)/.local/share/pokemon-agents/bg-shell.json"
         let m = (try? fm.attributesOfItem(atPath: bg))?[.modificationDate] as? Date
         out.append("bg@\(m?.timeIntervalSince1970 ?? 0)")
+        let categories = (try? fm.attributesOfItem(atPath: spaceCategoriesPath))?[.modificationDate] as? Date
+        out.append("categories@\(categories?.timeIntervalSince1970 ?? 0)")
         return out
     }
 
@@ -122,8 +126,15 @@ enum UnitFilesReader {
                 }
             }
         }
+        if let object = json(spaceCategoriesPath) as? [String: Any] {
+            for (label, value) in object {
+                if let category = value as? String { files.spaceCategories[label.lowercased()] = category }
+            }
+        }
         return files
     }
+
+    static var spaceCategoriesPath: String { "\(home)/.local/state/unit-space-categories.json" }
 
     private static func json(_ path: String) -> Any? {
         guard let data = FileManager.default.contents(atPath: path) else { return nil }

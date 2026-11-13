@@ -585,7 +585,8 @@ struct HerdrDestinationSection: View {
                             .font(.caption).disabled(!store.destinationEnabled)
                     }
                 }
-                let overrides = SpaceCategory.decodeOverrides(categoryOverridesRaw)
+                let overrides = SpaceCategory.merged(manual: SpaceCategory.decodeOverrides(categoryOverridesRaw),
+                                                     unit: unitProgress.files.spaceCategories)
                 let hiddenCategories = SpaceCategory.decodeCollapsed(collapsedCategoriesRaw)
                 ForEach(SpaceCategory.grouped((store.snapshot ?? store.cachedSnapshot)?.workspaces ?? [], overrides: overrides)) { group in
                     let isHidden = hiddenCategories.contains(group.category)
@@ -796,6 +797,13 @@ enum SpaceCategory: String, CaseIterable, Codable, Identifiable {
     static func grouped(_ spaces: [HerdrWorkspace], overrides: [String: SpaceCategory]) -> [SpaceCategoryGroup] {
         let buckets = Dictionary(grouping: spaces) { category(for: $0.label, overrides: overrides) }
         return allCases.compactMap { category in buckets[category].map { SpaceCategoryGroup(category: category, spaces: $0) } }
+    }
+
+    /// Commander-set categories (from the unit state file) under the user's own context-menu pins.
+    static func merged(manual: [String: SpaceCategory], unit: [String: String]) -> [String: SpaceCategory] {
+        var map: [String: SpaceCategory] = [:]
+        for (label, raw) in unit { if let category = SpaceCategory(rawValue: raw) { map[label.lowercased()] = category } }
+        return map.merging(manual) { _, mine in mine }
     }
 
     static func decodeOverrides(_ raw: String) -> [String: SpaceCategory] {
