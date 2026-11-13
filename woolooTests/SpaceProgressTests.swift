@@ -69,6 +69,7 @@ final class SpaceCategoryTests: XCTestCase {
             "Upscayl Fork": .creative, "Smart Video Library": .creative,
             "options-trading": .finance, "Finance deep dive": .finance, "Budgeting": .finance, "Investing": .finance,
             "Learn Canto": .misc,
+            "Study Central": .school, "ECN104 Midterm 2": .school, "MTH131": .school,
         ]
         for (label, category) in expected {
             XCTAssertEqual(SpaceCategory.automatic(for: label), category, label)

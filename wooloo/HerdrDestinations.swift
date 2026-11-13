@@ -752,13 +752,14 @@ struct HerdrDestinationSection: View {
 /// Project groups in the Spaces list, shown in this order. A Space is placed by keywords in its label
 /// unless it was pinned to a group from its context menu (pins are keyed by the lowercased label).
 enum SpaceCategory: String, CaseIterable, Codable, Identifiable {
-    case claude, creative, finance, misc
+    case claude, school, creative, finance, misc
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .claude: "Claude Optimization"
+        case .school: "School"
         case .creative: "Creative Projects"
         case .finance: "Finance"
         case .misc: "Miscellaneous"
@@ -771,6 +772,8 @@ enum SpaceCategory: String, CaseIterable, Codable, Identifiable {
     /// Checked in this order; a keyword matches the start of any word in the label.
     static let keywords: [(SpaceCategory, [String])] = [
         (.claude, ["claude", "skill", "rishabh"]),
+        (.school, ["study", "studies", "school", "course", "homework", "exam", "midterm", "quiz", "lecture",
+                   "semester", "university", "tmu", "gpa", "ecn", "mth", "law", "cmn", "gms"]),
         (.finance, ["option", "trading", "trade", "finance", "financial", "budget", "invest", "stock", "money",
                     "tax", "crypto", "portfolio"]),
         (.creative, ["playbox", "superintel", "crushon", "bpm", "upscayl", "video", "amv", "marquee", "music",
