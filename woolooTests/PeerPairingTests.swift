@@ -357,7 +357,9 @@ final class PeerPairingTests: XCTestCase {
             ("touch \(marker.path)", "unsupported request; this key may only open Herdr bridges"),
             ("", "unsupported request; this key may only open Herdr bridges"),
             (nil, "unsupported request; this key may only open Herdr bridges"),
-            ("exec /x --session $(touch \(marker.path)) remote-api-bridge", "invalid session name"),
+            // A space inside the session token stops the bridge line from matching at all.
+            ("exec /x --session $(touch \(marker.path)) remote-api-bridge", "unsupported request; this key may only open Herdr bridges"),
+            ("exec /x --session $(id) remote-api-bridge", "invalid session name"),
             ("exec /x --session `id` remote-api-bridge", "invalid session name"),
             ("exec /x --session \(String(repeating: "s", count: 65)) remote-api-bridge", "invalid session name"),
             (String(repeating: "x", count: 16385), "request too long"),
