@@ -16,6 +16,16 @@ struct PeerPairingView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var result: String?
+    @State private var remoteSession = ""
+    @State private var remoteSessionEdited = false
+    @StateObject private var adder: PeerMachineAdder
+    @State private var pairedCode: PeerPairingCode?
+
+    init(catalog: HerdrConnectionCatalog, destinations: HerdrDestinations) {
+        self.catalog = catalog
+        self.destinations = destinations
+        _adder = StateObject(wrappedValue: PeerMachineAdder(catalog: catalog))
+    }
 
     private var peerCode: PeerPairingCode? {
         pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : try? PeerPairingCode(code: pasted)
@@ -71,12 +81,33 @@ struct PeerPairingView: View {
                     } else if !pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text(decodeError).font(.caption).foregroundStyle(.red)
                     }
+                    TextField("Session on the other computer", text: $remoteSession)
+                        .onChange(of: remoteSession) { _, value in
+                            remoteSessionEdited = value != (peerCode?.session ?? "")
+                        }
                     Toggle("Add “\(PeerPairing.includeLine)” to ~/.ssh/config", isOn: $addInclude)
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(4)
             }
 
             if let result { Text(result).font(.caption).textSelection(.enabled) }
             if let error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
+            if let failure = adder.failureText {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Profile written, but Herdr couldn't add the machine. Herdr said:")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.red)
+                    ScrollView {
+                        Text(failure).font(.caption.monospaced()).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxHeight: 120)
+                    HStack {
+                        Button("Copy Error") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(failure, forType: .string)
+                        }
+                        Button("Retry") { retryAdd() }.disabled(busy || adder.state == .adding)
+                    }
+                }
+            }
 
             HStack {
                 Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -89,6 +120,9 @@ struct PeerPairingView: View {
         }
         .padding(20)
         .frame(width: 560)
+        .onChange(of: pasted) { _, _ in
+            if !remoteSessionEdited { remoteSession = peerCode?.session ?? "" }
+        }
         .task {
             // The host name can block on the network, so it is read off the main thread.
             guard target.isEmpty, let value = await BlockingWork.run({ Optional(PeerPairing.defaultTarget()) }) else { return }
@@ -164,12 +198,19 @@ struct PeerPairingView: View {
             }
             if outcome.includeAdded { notes.append("Added the Include line to ~/.ssh/config.") }
             result = notes.joined(separator: " ")
-            do {
-                try await catalog.manage(PeerPairing.machineArguments(for: code))
-                destinations.refresh(catalog.machines)
-            } catch {
-                self.error = "Profile written; Herdr couldn't add it: \(error.localizedDescription)"
-            }
+            pairedCode = code
+            await runAdd(code)
+        }
+    }
+
+    private func retryAdd() {
+        guard let code = pairedCode ?? peerCode else { return }
+        Task { await runAdd(code) }
+    }
+
+    private func runAdd(_ code: PeerPairingCode) async {
+        if await adder.add(code, session: remoteSession) {
+            destinations.refresh(catalog.machines)
         }
     }
 }

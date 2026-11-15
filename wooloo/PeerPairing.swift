@@ -261,8 +261,10 @@ enum PeerPairing {
         return outcome
     }
 
-    static func machineArguments(for code: PeerPairingCode) -> [String] {
-        ["add", alias(code.peerID), "--remote-session", code.session, "--label", code.label]
+    static func machineArguments(for code: PeerPairingCode, session: String? = nil) -> [String] {
+        let override = session?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return ["add", alias(code.peerID), "--remote-session", override.isEmpty ? code.session : override,
+                "--label", code.label]
     }
 
     /// sshd does not unquote inside `command="…"`, so only paths without special characters are accepted.
