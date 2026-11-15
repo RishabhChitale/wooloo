@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import SwiftUI
 
 // Peer metadata sync for the Mac app (docs/sync-protocol.md). The wire exchange lives in
@@ -167,6 +168,10 @@ final class PeerSyncService: ObservableObject, PeerSpaceMetadataProviding {
     private var delivered: Hlc?
     private(set) var peerNode: String?
     private var replica: Replica?
+    private var localStore: HerdrStore?
+    private var cancellable: AnyCancellable?
+    /// Per local workspace id: the label both sides last agreed on, to tell a local rename from a remote one.
+    private var known: [String: String] = [:]
 
     init(machine: HerdrMachineProfile, engine: PeerSyncEngine = PeerSyncEngine(store: PeerSyncEngine.defaultStore()),
          interval: TimeInterval = 60,
@@ -217,6 +222,7 @@ final class PeerSyncService: ObservableObject, PeerSpaceMetadataProviding {
             peerNode = outcome.peerNode
             delivered = engine.latestLocalClock()
             replica = engine.snapshot()
+            reconcile()
             status = .synced(Date())
             if outcome.received > 0 { revision += 1 }
             backoff.reset()
@@ -227,6 +233,51 @@ final class PeerSyncService: ObservableObject, PeerSpaceMetadataProviding {
             let delay = backoff.delay
             backoff.failed()
             return delay
+        }
+    }
+
+    // MARK: Local Herdr workspaces
+
+    /// Follows this Mac's own Herdr workspace list: local renames are published, synced names are applied
+    /// through Herdr's own workspace.rename. Categories travel through the unit state file instead.
+    func observe(_ store: HerdrStore) {
+        guard localStore !== store else { return }
+        localStore = store
+        cancellable = store.snapshotPublisher.sink { [weak self] _ in
+            Task { @MainActor in self?.reconcile() }
+        }
+    }
+
+    private func syncedName(_ id: String, node: String) -> String? {
+        guard let replica, let uuid = replica.lookup(host: node, herdrId: id) else { return nil }
+        return replica.spaceView(uuid).name
+    }
+
+    func reconcile() {
+        guard let store = localStore, let snap = store.snapshot, let node = try? engine.node() else { return }
+        var edited: [(id: String, label: String)] = []
+        for w in snap.workspaces {
+            let remote = syncedName(w.workspaceID, node: node)
+            if let was = known[w.workspaceID] {
+                if w.label != was { edited.append((w.workspaceID, w.label)); known[w.workspaceID] = w.label }
+                else if let remote, remote != w.label { store.renameWorkspace(w.workspaceID, to: remote); known[w.workspaceID] = remote }
+            } else if let remote, remote != w.label {
+                store.renameWorkspace(w.workspaceID, to: remote); known[w.workspaceID] = remote
+            } else {
+                known[w.workspaceID] = w.label
+                edited.append((w.workspaceID, w.label))
+            }
+        }
+        known = known.filter { k, _ in snap.workspaces.contains { $0.workspaceID == k } }
+        guard !edited.isEmpty else { return }
+        let engine = engine
+        let all = snap.workspaces.map { ($0.workspaceID, $0.label) }
+        Task {
+            _ = try? await BlockingWork.run(priority: .utility) {
+                try engine.publishLocal(workspaces: all.map { (id: $0.0, label: $0.1) }, categories: [:])
+            }
+            self.replica = engine.snapshot()
+            self.requestSync()
         }
     }
 
@@ -290,11 +341,16 @@ struct PeerSyncBadge: View {
 /// Owns one sync service per peer row, started when the row appears and stopped when it goes.
 struct PeerSyncRow: View {
     let machine: HerdrMachineProfile
+    var localStore: HerdrStore?
     @StateObject private var holder = PeerSyncHolder()
 
     var body: some View {
         PeerSyncBadge(service: holder.service(for: machine))
-            .onAppear { holder.service(for: machine).start() }
+            .onAppear {
+                let service = holder.service(for: machine)
+                if let localStore { service.observe(localStore) }
+                service.start()
+            }
             .onDisappear { holder.current?.stop() }
     }
 }
