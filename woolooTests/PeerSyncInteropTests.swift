@@ -49,8 +49,13 @@ final class PeerSyncInteropTests: XCTestCase {
         let iniOut = PeerSyncMemoryChannel()
         let got = try PeerSyncExchange.initiate(input: PeerSyncMemoryChannel(respOut.written), output: iniOut, node: s.iniNode, herdrVersion: s.herdr, regs: sent)
         for r in got.reply { _ = ini.apply(r, now: s.now) }
-        XCTAssertEqual(iniOut.written, stream, "initiate() must write exactly the initiator stream")
-        return Run(toResponder: String(decoding: stream, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: true).map(String.init), toInitiator: respOut.writtenLines,
+        // initiate() writes the real wire bytes (the end line is not key-sorted), so record those; the hand-built
+        // stream above must only be semantically identical (same canonical lines), which the responder already accepted.
+        func canonLines(_ d: Data) throws -> [String] {
+            try String(decoding: d, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: true).map { try PeerSyncJSON.canonical(PeerSyncJSON.parse(String($0))) }
+        }
+        XCTAssertEqual(try canonLines(iniOut.written), try canonLines(stream), "initiate() must write the same messages as the hand-built stream")
+        return Run(toResponder: String(decoding: iniOut.written, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: true).map(String.init), toInitiator: respOut.writtenLines,
                    iniFinal: canon(ini.sortedRegs()), respFinal: canon(resp.sortedRegs()))
     }
 
