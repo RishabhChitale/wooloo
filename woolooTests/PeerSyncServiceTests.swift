@@ -21,24 +21,28 @@ final class PeerSyncServiceTests: XCTestCase {
     }
 
     /// One exchange, A initiating. `partitioned` makes the link fail before anything is sent.
+    /// In-memory channels with bounded waits: no pipes, sockets or sleeps, and a stuck side fails the test fast.
     @discardableResult
     private func sync(_ a: PeerSyncEngine, _ b: PeerSyncEngine, partitioned: Bool = false) throws -> PeerSyncExchangeResult {
         if partitioned { throw PeerSyncError.io("partitioned") }
-        let aToB = Pipe(), bToA = Pipe()
-        var responderError: Error?
+        let aToB = TestChannel(), bToA = TestChannel()
+        let box = ResponderBox()
         let done = DispatchSemaphore(value: 0)
         Thread.detachNewThread {
-            do { try b.respond(input: PeerSyncPipeInput(aToB.fileHandleForReading),
-                               output: PeerSyncPipeOutput(bToA.fileHandleForWriting)) } catch { responderError = error }
-            try? bToA.fileHandleForWriting.close()
+            do { try b.respond(input: aToB, output: bToA) } catch { box.error = error }
+            bToA.close()
             done.signal()
         }
-        defer { try? aToB.fileHandleForWriting.close() }
-        let outcome = try a.exchange(input: PeerSyncPipeInput(bToA.fileHandleForReading),
-                                     output: PeerSyncPipeOutput(aToB.fileHandleForWriting))
-        try? aToB.fileHandleForWriting.close()
-        done.wait()
-        XCTAssertNil(responderError)
+        let outcome: PeerSyncExchangeResult
+        do {
+            outcome = try a.exchange(input: bToA, output: aToB)
+        } catch {
+            aToB.close(); bToA.close(); _ = done.wait(timeout: .now() + 10)
+            throw error
+        }
+        aToB.close()
+        XCTAssertEqual(done.wait(timeout: .now() + 10), .success, "responder did not finish")
+        XCTAssertNil(box.error)
         return outcome
     }
 
@@ -111,5 +115,30 @@ final class PeerSyncServiceTests: XCTestCase {
         XCTAssertEqual(remote.renames, ["w1": "C"]); XCTAssertTrue(remote.published.isEmpty)
         let settled = PeerSyncService.labelPlan(current: ["w1": "C"], known: remote.known, remote: ["w1": "C"])
         XCTAssertTrue(settled.renames.isEmpty); XCTAssertTrue(settled.published.isEmpty)
+    }
+}
+
+private final class ResponderBox: @unchecked Sendable { var error: Error? }
+
+/// One-way byte channel: write appends, readChunk waits (bounded) for data or close.
+private final class TestChannel: PeerSyncInput, PeerSyncOutput, @unchecked Sendable {
+    private let cond = NSCondition()
+    private var data = Data()
+    private var closed = false
+
+    func write(_ d: Data) throws { cond.lock(); data.append(d); cond.broadcast(); cond.unlock() }
+    func flush() throws {}
+    func close() { cond.lock(); closed = true; cond.broadcast(); cond.unlock() }
+
+    func readChunk(max: Int) throws -> Data {
+        cond.lock(); defer { cond.unlock() }
+        let deadline = Date().addingTimeInterval(10)
+        while data.isEmpty && !closed {
+            if !cond.wait(until: deadline) { throw PeerSyncError.io("test channel read timed out") }
+        }
+        let n = min(max, data.count)
+        let out = data.prefix(n)
+        data.removeFirst(n)
+        return Data(out)
     }
 }
