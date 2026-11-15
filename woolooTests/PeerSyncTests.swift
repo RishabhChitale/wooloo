@@ -3,24 +3,24 @@ import XCTest
 
 /// Runs the shared conformance vectors (docs/sync-vectors.json in wooloo-win) against the Swift port.
 final class PeerSyncTests: XCTestCase {
-    private static let vectors: JSONValue = {
+    private static let vectors: PeerSyncJSONValue = {
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .appendingPathComponent("Fixtures/sync-vectors.json")
         let text = String(decoding: (try? Data(contentsOf: url)) ?? Data(), as: UTF8.self)
         return (try? PeerSyncJSON.parse(text)) ?? .null
     }()
 
-    private func section(_ name: String) -> [JSONValue] {
+    private func section(_ name: String) -> [PeerSyncJSONValue] {
         let a = Self.vectors[name]?.arrayValue ?? []
         XCTAssertFalse(a.isEmpty, "missing vector section \(name)")
         return a
     }
 
-    private func str(_ v: JSONValue, _ k: String) -> String { v[k]?.stringValue ?? "" }
-    private func u64(_ v: JSONValue?) -> UInt64 { v?.uint64Value ?? 0 }
-    private func regs(_ v: JSONValue?) -> [Register] { (v?.arrayValue ?? []).compactMap { Register.from(json: $0) } }
-    private func hlc(_ v: JSONValue?) -> Hlc { v.flatMap { Hlc.from(json: $0) } ?? .zero }
-    private func canon(_ rs: [Register]) -> [String] { rs.map { PeerSyncJSON.canonical($0.json) } }
+    private func str(_ v: PeerSyncJSONValue, _ k: String) -> String { v[k]?.stringValue ?? "" }
+    private func u64(_ v: PeerSyncJSONValue?) -> UInt64 { v?.uint64Value ?? 0 }
+    private func regs(_ v: PeerSyncJSONValue?) -> [PeerSyncRegister] { (v?.arrayValue ?? []).compactMap { PeerSyncRegister.from(json: $0) } }
+    private func hlc(_ v: PeerSyncJSONValue?) -> PeerSyncHlc { v.flatMap { PeerSyncHlc.from(json: $0) } ?? .zero }
+    private func canon(_ rs: [PeerSyncRegister]) -> [String] { rs.map { PeerSyncJSON.canonical($0.json) } }
 
     func testHeaderMatches() {
         XCTAssertEqual(Self.vectors["format"]?.uint64Value, UInt64(PeerSync.format))
@@ -50,7 +50,7 @@ final class PeerSyncTests: XCTestCase {
 
     func testCompareVectors() {
         for v in section("compare") {
-            guard let a = Register.from(json: v["a"] ?? .null), let b = Register.from(json: v["b"] ?? .null) else {
+            guard let a = PeerSyncRegister.from(json: v["a"] ?? .null), let b = PeerSyncRegister.from(json: v["b"] ?? .null) else {
                 XCTFail("bad compare vector \(str(v, "name"))"); continue
             }
             let w = str(v, "winner")
@@ -67,13 +67,13 @@ final class PeerSyncTests: XCTestCase {
         for v in section("validate") {
             let name = str(v, "name")
             let want = v["valid"]?.boolValue ?? false
-            let ok = v["op"].flatMap { Register.from(json: $0) }?.isValid ?? false
+            let ok = v["op"].flatMap { PeerSyncRegister.from(json: $0) }?.isValid ?? false
             XCTAssertEqual(ok, want, name)
         }
     }
 
-    private func mergeRun(_ ops: [Register], now: UInt64) -> (Replica, Int) {
-        var r = Replica(node: "ref-node")
+    private func mergeRun(_ ops: [PeerSyncRegister], now: UInt64) -> (PeerSyncReplica, Int) {
+        var r = PeerSyncReplica(node: "ref-node")
         var rejected = 0
         for op in ops where r.apply(op, now: now).isRejected { rejected += 1 }
         return (r, rejected)
@@ -102,9 +102,9 @@ final class PeerSyncTests: XCTestCase {
             let name = str(v, "name")
             let now = u64(v["now"])
             let mac = "mac-3f9a21c0", win = "win-07be55d1"
-            var ini = Replica(node: win)
+            var ini = PeerSyncReplica(node: win)
             for r in regs(v["initiator"]) { ini.insertRaw(r) }
-            var resp = Replica(node: mac)
+            var resp = PeerSyncReplica(node: mac)
             for r in regs(v["responder"]) { resp.insertRaw(r) }
 
             // Responder runs against initiator bytes produced by the real initiator code path.
@@ -117,7 +117,7 @@ final class PeerSyncTests: XCTestCase {
             for r in sent { stream.append(Data((PeerSyncJSON.canonical(r.wire) + "\n").utf8)) }
             stream.append(Data((PeerSyncJSON.canonical(.object([("t", .string("end")), ("count", .int(Int64(sent.count)))])) + "\n").utf8))
             let rIn = PeerSyncMemoryChannel(stream)
-            var absorbed: Absorbed?
+            var absorbed: PeerSyncAbsorbed?
             try PeerSyncExchange.respond(input: rIn, output: fromResponder, node: mac) { _, ops, malformed in
                 let a = resp.absorb(ops, malformed: malformed, now: now)
                 absorbed = a
@@ -140,13 +140,13 @@ final class PeerSyncTests: XCTestCase {
     func testBindingVectors() throws {
         for v in section("binding") {
             let name = str(v, "name")
-            var r = Replica(node: str(v, "node"))
+            var r = PeerSyncReplica(node: str(v, "node"))
             for reg in regs(v["registers"]) { r.insertRaw(reg) }
             let ws = (v["workspaces"]?.arrayValue ?? []).map { (id: str($0, "herdr_id"), label: str($0, "label")) }
             let plan = r.planBinding(ws)
             let want = (v["expect"]?.arrayValue ?? []).map {
-                Binding(herdrId: str($0, "herdr_id"), label: str($0, "label"),
-                        kind: BindKind(rawValue: str($0, "kind")) ?? .minted,
+                PeerSyncBinding(herdrId: str($0, "herdr_id"), label: str($0, "label"),
+                        kind: PeerSyncBindKind(rawValue: str($0, "kind")) ?? .minted,
                         space: $0["space"]?.stringValue)
             }
             let orphans = (v["expect_orphans"]?.arrayValue ?? []).compactMap { $0.stringValue }
@@ -169,14 +169,14 @@ final class PeerSyncTests: XCTestCase {
         }
     }
 
-    private func pairs(_ v: JSONValue?) -> [(String, String)] {
+    private func pairs(_ v: PeerSyncJSONValue?) -> [(String, String)] {
         (v?.objectValue ?? []).compactMap { k, x in x.stringValue.map { (k, $0) } }
     }
 
     func testUnitCatImportVectors() throws {
         for v in section("unitcat_import") {
             let name = str(v, "name")
-            var s = PeerSyncState(node: "mac-3f9a21c0", replica: Replica(node: "mac-3f9a21c0"))
+            var s = PeerSyncState(node: "mac-3f9a21c0", replica: PeerSyncReplica(node: "mac-3f9a21c0"))
             s.unitcatSnapshot = pairs(v["snapshot"])
             let dir = FileManager.default.temporaryDirectory.appendingPathComponent("wooloo-sync-\(UUID().uuidString)")
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -198,7 +198,7 @@ final class PeerSyncTests: XCTestCase {
 
     func testUnitCatExportVectors() throws {
         for v in section("unitcat_export") {
-            var s = PeerSyncState(node: "mac-3f9a21c0", replica: Replica(node: "mac-3f9a21c0"))
+            var s = PeerSyncState(node: "mac-3f9a21c0", replica: PeerSyncReplica(node: "mac-3f9a21c0"))
             for r in regs(v["registers"]) { s.replica.insertRaw(r) }
             let dir = FileManager.default.temporaryDirectory.appendingPathComponent("wooloo-sync-\(UUID().uuidString)")
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -233,22 +233,22 @@ final class PeerSyncTests: XCTestCase {
 
     // MARK: exchange refusals
 
-    private func line(_ v: JSONValue) -> Data { Data((PeerSyncJSON.compact(v) + "\n").utf8) }
+    private func line(_ v: PeerSyncJSONValue) -> Data { Data((PeerSyncJSON.compact(v) + "\n").utf8) }
 
     func testResponderRefusesSameNodeId() {
         let input = PeerSyncMemoryChannel(line(PeerSyncExchange.hello("mac-3f9a21c0")))
         let out = PeerSyncMemoryChannel()
         XCTAssertThrowsError(try PeerSyncExchange.respond(input: input, output: out, node: "mac-3f9a21c0") { _, _, _ in
-            Absorbed(accepted: 0, rejected: 0, reply: [])
+            PeerSyncAbsorbed(accepted: 0, rejected: 0, reply: [])
         })
         XCTAssertTrue(out.writtenLines.last?.contains("\"error\"") == true)
     }
 
     func testResponderRefusesProto2() {
-        let hello: JSONValue = .object([("t", .string("hello")), ("proto", .int(2)), ("node", .string("win-07be55d1"))])
+        let hello: PeerSyncJSONValue = .object([("t", .string("hello")), ("proto", .int(2)), ("node", .string("win-07be55d1"))])
         let out = PeerSyncMemoryChannel()
         XCTAssertThrowsError(try PeerSyncExchange.respond(input: PeerSyncMemoryChannel(line(hello)), output: out, node: "mac-3f9a21c0") { _, _, _ in
-            Absorbed(accepted: 0, rejected: 0, reply: [])
+            PeerSyncAbsorbed(accepted: 0, rejected: 0, reply: [])
         })
     }
 
@@ -256,7 +256,7 @@ final class PeerSyncTests: XCTestCase {
         var d = line(PeerSyncExchange.hello("win-07be55d1"))
         d.append(Data("{\"t\":\"op\"".utf8))
         XCTAssertThrowsError(try PeerSyncExchange.respond(input: PeerSyncMemoryChannel(d), output: PeerSyncMemoryChannel(), node: "mac-3f9a21c0") { _, _, _ in
-            Absorbed(accepted: 0, rejected: 0, reply: [])
+            PeerSyncAbsorbed(accepted: 0, rejected: 0, reply: [])
         })
     }
 

@@ -26,7 +26,7 @@ final class PeerSyncLineReader {
     init(_ input: PeerSyncInput) { self.input = input }
 
     /// One message object. Throws Protocol/Remote/Io as the protocol requires.
-    func readMessage() throws -> JSONValue {
+    func readMessage() throws -> PeerSyncJSONValue {
         var line = [UInt8]()
         while true {
             if let nl = buf.firstIndex(of: 0x0A) {
@@ -45,7 +45,7 @@ final class PeerSyncLineReader {
         if line.count > PeerSyncWire.maxLine { throw PeerSyncError.protocol("line too long") }
         if line.last == 0x0D { line.removeLast() }
         let text = String(decoding: line, as: UTF8.self)
-        let v: JSONValue
+        let v: PeerSyncJSONValue
         do { v = try PeerSyncJSON.parse(text) } catch { throw PeerSyncError.protocol("bad json") }
         guard case .object = v, let t = v["t"]?.stringValue else { throw PeerSyncError.protocol("missing message type") }
         if t == "error" {
@@ -59,7 +59,7 @@ final class PeerSyncLineReader {
 struct PeerSyncInitiated {
     var peer: String
     var peerHerdrVersion: String?
-    var reply: [Register]
+    var reply: [PeerSyncRegister]
     var malformed: UInt64
     var accepted: UInt64
     var rejected: UInt64
@@ -96,7 +96,7 @@ enum PeerSyncExchange {
         return out
     }
 
-    static func writeMessage(_ out: PeerSyncOutput, _ v: JSONValue, sorted: Bool = false) throws {
+    static func writeMessage(_ out: PeerSyncOutput, _ v: PeerSyncJSONValue, sorted: Bool = false) throws {
         let text = sorted ? PeerSyncJSON.canonical(v) : PeerSyncJSON.compact(v)
         let data = Data((text + "\n").utf8)
         if data.count - 1 > PeerSyncWire.maxLine { throw PeerSyncError.invalid("message too large") }
@@ -107,13 +107,13 @@ enum PeerSyncExchange {
         do { try out.flush() } catch let e as PeerSyncError { throw e } catch { throw PeerSyncError.io("\(error)") }
     }
 
-    static func hello(_ node: String, herdrVersion: String? = nil) -> JSONValue {
-        var m: [(String, JSONValue)] = [("t", .string("hello")), ("proto", .int(Int64(PeerSync.proto))), ("node", .string(node))]
+    static func hello(_ node: String, herdrVersion: String? = nil) -> PeerSyncJSONValue {
+        var m: [(String, PeerSyncJSONValue)] = [("t", .string("hello")), ("proto", .int(Int64(PeerSync.proto))), ("node", .string(node))]
         if let hv = herdrVersion, isHerdrVersion(hv) { m.append(("herdr_version", .string(hv))) }
         return .object(m)
     }
 
-    static func checkHello(_ v: JSONValue, own: String) throws -> PeerSyncHello {
+    static func checkHello(_ v: PeerSyncJSONValue, own: String) throws -> PeerSyncHello {
         guard v["t"]?.stringValue == "hello" else { throw PeerSyncError.protocol("expected hello") }
         guard case .int(let p)? = v["proto"], p == Int64(PeerSync.proto) else { throw PeerSyncError.protocol("unsupported protocol version") }
         guard let node = v["node"]?.stringValue, PeerSyncValidate.isNodeId(node) else { throw PeerSyncError.protocol("bad node id") }
@@ -136,15 +136,15 @@ enum PeerSyncExchange {
         try? out.flush()
     }
 
-    private static func readOps(_ r: PeerSyncLineReader) throws -> ([Register], UInt64) {
-        var ops: [Register] = []
+    private static func readOps(_ r: PeerSyncLineReader) throws -> ([PeerSyncRegister], UInt64) {
+        var ops: [PeerSyncRegister] = []
         var malformed: UInt64 = 0
-        var end: JSONValue?
+        var end: PeerSyncJSONValue?
         while end == nil {
             let m = try r.readMessage()
             switch m["t"]?.stringValue {
             case "op":
-                if let reg = Register.from(json: m) {
+                if let reg = PeerSyncRegister.from(json: m) {
                     if ops.count >= PeerSyncWire.maxOps { throw PeerSyncError.protocol("too many ops") }
                     ops.append(reg)
                 } else {
@@ -159,12 +159,12 @@ enum PeerSyncExchange {
         return (ops, malformed)
     }
 
-    private static func sendOps(_ out: PeerSyncOutput, _ regs: [Register]) throws {
+    private static func sendOps(_ out: PeerSyncOutput, _ regs: [PeerSyncRegister]) throws {
         for r in regs { try writeMessage(out, r.wire, sorted: true) }
     }
 
-    private static func endMessage(count: Int, accepted: UInt64? = nil, rejected: UInt64? = nil) -> JSONValue {
-        var m: [(String, JSONValue)] = [("t", .string("end")), ("count", .int(Int64(count)))]
+    private static func endMessage(count: Int, accepted: UInt64? = nil, rejected: UInt64? = nil) -> PeerSyncJSONValue {
+        var m: [(String, PeerSyncJSONValue)] = [("t", .string("end")), ("count", .int(Int64(count)))]
         if let a = accepted { m.append(("accepted", .int(Int64(clamping: a)))) }
         if let r = rejected { m.append(("rejected", .int(Int64(clamping: r)))) }
         return .object(m)
@@ -173,7 +173,7 @@ enum PeerSyncExchange {
     /// Responder side. `f` applies and saves, returning what was absorbed.
     @discardableResult
     static func respond(input: PeerSyncInput, output: PeerSyncOutput, node: String, herdrVersion: String? = nil,
-                        f: (_ peer: String, _ ops: [Register], _ malformed: UInt64) throws -> Absorbed) throws -> PeerSyncResponded {
+                        f: (_ peer: String, _ ops: [PeerSyncRegister], _ malformed: UInt64) throws -> PeerSyncAbsorbed) throws -> PeerSyncResponded {
         do {
             let r = PeerSyncLineReader(input)
             let peerHello = try checkHello(try r.readMessage(), own: node)
@@ -193,7 +193,7 @@ enum PeerSyncExchange {
     }
 
     /// Initiator side. Nothing is applied here; the caller applies the reply and saves.
-    static func initiate(input: PeerSyncInput, output: PeerSyncOutput, node: String, herdrVersion: String? = nil, regs: [Register]) throws -> PeerSyncInitiated {
+    static func initiate(input: PeerSyncInput, output: PeerSyncOutput, node: String, herdrVersion: String? = nil, regs: [PeerSyncRegister]) throws -> PeerSyncInitiated {
         let r = PeerSyncLineReader(input)
         try writeMessage(output, hello(node, herdrVersion: herdrVersion), sorted: true)
         try flush(output)
@@ -204,14 +204,14 @@ enum PeerSyncExchange {
         try writeMessage(output, endMessage(count: regs.count))
         try flush(output)
 
-        var reply: [Register] = []
+        var reply: [PeerSyncRegister] = []
         var malformed: UInt64 = 0
-        var end: JSONValue?
+        var end: PeerSyncJSONValue?
         while end == nil {
             let m = try r.readMessage()
             switch m["t"]?.stringValue {
             case "op":
-                if let reg = Register.from(json: m) {
+                if let reg = PeerSyncRegister.from(json: m) {
                     if reply.count >= PeerSyncWire.maxOps { throw PeerSyncError.protocol("too many ops") }
                     reply.append(reg)
                 } else { malformed += 1 }
