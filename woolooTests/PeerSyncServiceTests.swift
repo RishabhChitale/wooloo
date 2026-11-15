@@ -16,7 +16,7 @@ final class PeerSyncServiceTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         dirs.append(dir)
         let store = PeerSyncStore(path: dir.appendingPathComponent("state.json"))
-        try store.withState { $0 = PeerSyncState(node: node, replica: Replica(node: node), unitcatSnapshot: []) }
+        try store.withState { $0 = PeerSyncState(node: node, replica: PeerSyncReplica(node: node), unitcatSnapshot: []) }
         return PeerSyncEngine(store: store, unitCatsURL: nil)
     }
 

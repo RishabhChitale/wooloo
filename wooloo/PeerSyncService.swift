@@ -55,7 +55,7 @@ final class PeerSyncEngine: @unchecked Sendable {
     func node() throws -> String { try store.withState { $0.node } }
 
     /// Records edits made outside the replica (the unit categories file) as ops. Returns the registers to send.
-    func prepare() throws -> [Register] {
+    func prepare() throws -> [PeerSyncRegister] {
         try store.withState { state in
             if let url = unitCatsURL { _ = try PeerSyncUnitCats.importFile(url, into: &state, now: clock()) }
             return state.replica.sortedRegs()
@@ -115,16 +115,16 @@ final class PeerSyncEngine: @unchecked Sendable {
     }
 
     /// Registers written here that no exchange has delivered yet.
-    func pendingCount(since delivered: Hlc?) -> Int {
+    func pendingCount(since delivered: PeerSyncHlc?) -> Int {
         guard let state = try? store.load() else { return 0 }
         return state.replica.sortedRegs().filter { r in
             r.node == state.node && (delivered.map { $0 < r.hlc } ?? true)
         }.count
     }
 
-    func snapshot() -> Replica? { try? store.load().replica }
+    func snapshot() -> PeerSyncReplica? { try? store.load().replica }
 
-    func latestLocalClock() -> Hlc? {
+    func latestLocalClock() -> PeerSyncHlc? {
         guard let state = try? store.load() else { return nil }
         return state.replica.sortedRegs().filter { $0.node == state.node }.map(\.hlc).max()
     }
@@ -165,9 +165,9 @@ final class PeerSyncService: ObservableObject, PeerSpaceMetadataProviding {
     private var backoff = PeerBackoff()
     private var task: Task<Void, Never>?
     private var wake: CheckedContinuation<Void, Never>?
-    private var delivered: Hlc?
+    private var delivered: PeerSyncHlc?
     private(set) var peerNode: String?
-    private var replica: Replica?
+    private var replica: PeerSyncReplica?
     private var localStore: HerdrStore?
     private var cancellable: AnyCancellable?
     /// Per local workspace id: the label both sides last agreed on, to tell a local rename from a remote one.
