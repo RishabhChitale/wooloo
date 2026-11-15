@@ -51,7 +51,7 @@ final class PeerPairingTests: XCTestCase {
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let herdr = bin.appendingPathComponent("herdr")
         let script = "#!/bin/sh\nif [ \"$1\" = --version ]; then echo \"herdr 0.9.5\"; "
-            + "elif [ -e \"$HOME/herdr-capable\" ] && [ \"${*##* }\" = --check ]; then echo herdr-api-bridge-v1; "
+            + "elif [ -e \"$HOME/herdr-capable\" ] && { last=; for a in \"$@\"; do last=$a; done; [ \"$last\" = --check ]; }; then echo herdr-api-bridge-v1; "
             + "else printf 'ARGS:%s\\n' \"$*\"; fi\n"
         try Data(script.utf8).write(to: herdr)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: herdr.path)
