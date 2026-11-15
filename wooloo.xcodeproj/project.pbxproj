@@ -88,6 +88,7 @@
 		A1D000000000000000000104 /* PeerPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D100000000000000000104 /* PeerPairing.swift */; };
 		A1D000000000000000000105 /* PeerPairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D100000000000000000105 /* PeerPairingView.swift */; };
 		A1D000000000000000000106 /* PeerMachines.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D100000000000000000106 /* PeerMachines.swift */; };
+		A1D00000000000000000010A /* PeerSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D10000000000000000010A /* PeerSyncService.swift */; };
 		A10000000000000000000F01 /* AgentQuota.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000F02 /* AgentQuota.swift */; };
 		D50000000000000000000005 /* PeerSyncStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000006 /* PeerSyncStore.swift */; };
 		D50000000000000000000003 /* PeerSyncExchange.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000004 /* PeerSyncExchange.swift */; };
@@ -114,6 +115,7 @@
 		C3D000000000000000000102 /* MobileSSHAccessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D100000000000000000102 /* MobileSSHAccessTests.swift */; };
 		C3D000000000000000000103 /* PeerPairingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D100000000000000000103 /* PeerPairingTests.swift */; };
 		C3D000000000000000000104 /* PeerMachinesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D100000000000000000104 /* PeerMachinesTests.swift */; };
+		C3D000000000000000000105 /* PeerSyncServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D100000000000000000105 /* PeerSyncServiceTests.swift */; };
 		8DFA5B3024E947D299999C0F /* IntegratedWindowChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA8DB6C03C54F27BDBFE67F /* IntegratedWindowChromeTests.swift */; };
 		C30000000000000000000064 /* ContentCommandsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000065 /* ContentCommandsTests.swift */; };
 		C30000000000000000000068 /* WorkspaceExplorerModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000069 /* WorkspaceExplorerModelTests.swift */; };
@@ -275,6 +277,7 @@
 		A1D100000000000000000104 /* PeerPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerPairing.swift; sourceTree = "<group>"; };
 		A1D100000000000000000105 /* PeerPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerPairingView.swift; sourceTree = "<group>"; };
 		A1D100000000000000000106 /* PeerMachines.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerMachines.swift; sourceTree = "<group>"; };
+		A1D10000000000000000010A /* PeerSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerSyncService.swift; sourceTree = "<group>"; };
 		A10000000000000000000F02 /* AgentQuota.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentQuota.swift; sourceTree = "<group>"; };
 		D50000000000000000000006 /* PeerSyncStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerSyncStore.swift; sourceTree = "<group>"; };
 		D50000000000000000000004 /* PeerSyncExchange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerSyncExchange.swift; sourceTree = "<group>"; };
@@ -301,6 +304,7 @@
 		C3D100000000000000000102 /* MobileSSHAccessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileSSHAccessTests.swift; sourceTree = "<group>"; };
 		C3D100000000000000000103 /* PeerPairingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerPairingTests.swift; sourceTree = "<group>"; };
 		C3D100000000000000000104 /* PeerMachinesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerMachinesTests.swift; sourceTree = "<group>"; };
+		C3D100000000000000000105 /* PeerSyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerSyncServiceTests.swift; sourceTree = "<group>"; };
 		DBA8DB6C03C54F27BDBFE67F /* IntegratedWindowChromeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegratedWindowChromeTests.swift; sourceTree = "<group>"; };
 		C30000000000000000000065 /* ContentCommandsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentCommandsTests.swift; sourceTree = "<group>"; };
 		C30000000000000000000069 /* WorkspaceExplorerModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceExplorerModelTests.swift; sourceTree = "<group>"; };
@@ -462,6 +466,7 @@
 				A1D100000000000000000104 /* PeerPairing.swift */,
 				A1D100000000000000000105 /* PeerPairingView.swift */,
 				A1D100000000000000000106 /* PeerMachines.swift */,
+				A1D10000000000000000010A /* PeerSyncService.swift */,
 				A1000000000000000000C002 /* AppUpdater.swift */,
 				A1000000000000000000C006 /* Info.plist */,
 				A10000000000000000000F02 /* AgentQuota.swift */,
@@ -525,6 +530,7 @@
 				C3D100000000000000000102 /* MobileSSHAccessTests.swift */,
 				C3D100000000000000000103 /* PeerPairingTests.swift */,
 				C3D100000000000000000104 /* PeerMachinesTests.swift */,
+				C3D100000000000000000105 /* PeerSyncServiceTests.swift */,
 				C30000000000000000000F06 /* AgentQuotaTests.swift */,
 				D50000000000000000000008 /* PeerSyncTests.swift */,
 				C30000000000000000000F0A /* QuickOpenTests.swift */,
@@ -780,6 +786,7 @@
 				A1D000000000000000000104 /* PeerPairing.swift in Sources */,
 				A1D000000000000000000105 /* PeerPairingView.swift in Sources */,
 				A1D000000000000000000106 /* PeerMachines.swift in Sources */,
+				A1D00000000000000000010A /* PeerSyncService.swift in Sources */,
 				A1000000000000000000C001 /* AppUpdater.swift in Sources */,
 				A10000000000000000000F01 /* AgentQuota.swift in Sources */,
 				D50000000000000000000005 /* PeerSyncStore.swift in Sources */,
@@ -832,6 +839,7 @@
 				C3D000000000000000000102 /* MobileSSHAccessTests.swift in Sources */,
 				C3D000000000000000000103 /* PeerPairingTests.swift in Sources */,
 				C3D000000000000000000104 /* PeerMachinesTests.swift in Sources */,
+				C3D000000000000000000105 /* PeerSyncServiceTests.swift in Sources */,
 				C30000000000000000000F05 /* AgentQuotaTests.swift in Sources */,
 				D50000000000000000000007 /* PeerSyncTests.swift in Sources */,
 				C30000000000000000000F09 /* QuickOpenTests.swift in Sources */,
