@@ -492,6 +492,14 @@ private struct DestinationContentView: View {
                     sectionTitle("SPACES", icon: "square.stack")
                 }
                 Spacer()
+                Button { commands.perform(.toggleSidebar) } label: {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: typography.secondary, weight: .semibold))
+                        .frame(width: 23, height: typography.metric(20))
+                }
+                .buttonStyle(.plain)
+                .help(window.showsSidebar ? "Hide Sidebar" : "Show Sidebar")
+                .accessibilityIdentifier("toggle-left-sidebar")
                 Button {
                     activeDocumentID = nil
                     destinations.createSpace(on: herdr)
