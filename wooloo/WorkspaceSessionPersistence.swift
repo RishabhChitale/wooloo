@@ -394,6 +394,12 @@ final class WoolooAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppUpdater.shared.start()
+        if !WoolooApp.isHostingTests {
+            DispatchQueue.global(qos: .utility).async {
+                PeerPairing.refreshHerdrLinkIfPaired(home: FileManager.default.homeDirectoryForCurrentUser,
+                                                     herdr: RemoteAccessSystem.herdrExecutable)
+            }
+        }
         if !WoolooApp.isHostingTests, RemoteAccessModel.shared.startsAtLaunch { RemoteAccessModel.shared.startAtLaunch() }
     }
 

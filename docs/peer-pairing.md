@@ -50,9 +50,13 @@ This Mac's code uses:
 
 Only after the user reviews the peer's label, target and both fingerprints:
 
-1. Installs the dispatcher `~/.local/share/wooloo/peer-bridge` (mode 700, written atomically). It
-   holds the Herdr path and version found at pairing time; the path must match
-   `^/[A-Za-z0-9._/-]+$`.
+1. Points the symbolic link `~/.local/share/wooloo/peer/herdr` at the real Herdr binary (created
+   or swapped with an atomic rename; Herdr's own path usually contains "Application Support",
+   which the forced command cannot hold safely). Then installs the dispatcher
+   `~/.local/share/wooloo/peer-bridge` (mode 700, written atomically). It holds that link path
+   (`<home>/.local/share/wooloo/peer/herdr`, matching `^/[A-Za-z0-9._/-]+$`) as the paired Herdr
+   path, plus the Herdr version. wooloo re-points the link at launch when Herdr has moved or
+   updated, so the dispatcher text and the pairing stay valid.
 2. Adds the peer's public key to `~/.ssh/authorized_keys` through `MobileSSHAccess`'s locked,
    atomic script, with the options
    `command="<home>/.local/share/wooloo/peer-bridge --peer <id>",restrict`. If the key is already
@@ -94,7 +98,8 @@ runs a fixed command itself. A request that matches no template exits 64 with
   (argv requests), plus the `/bin/sh -s` probe scripts (`uname`, path probe, candidates, `test -x`,
   `status client|server --json`, `session list --json`) are the only things accepted.
   Framed entries print `herdr-remote-output-ready:1` first.
-- **`{herdr}` matches only the bare paired path.** `RemoteExecutable::command` uses the stored path
+- **`{herdr}` matches only the bare paired path**, which is always the stable link
+  `<home>/.local/share/wooloo/peer/herdr` (a Windows peer stores that string as the Mac's Herdr path). `RemoteExecutable::command` uses the stored path
   verbatim, so a request names exactly the path recorded at pairing. A quoted, relative or
   different path is refused, and Herdr installs (`install`, live handoff) stay refused.
 - A bad peer name, a missing paired Herdr or a malformed forced command also exit 64.
