@@ -149,6 +149,11 @@ final class HerdrRemoteBridge: Sendable {
             args += ["-o", "ControlMaster=auto", "-o", "ControlPath=\(directory)/%C", "-o", "ControlPersist=60"]
         }
         if let port = endpoint.port { args += ["-p", port] }
+        // A paired computer's key runs only the dispatcher's allow-listed commands.
+        if PeerMachine.isPeer(machine), let peerCommand = PeerMachine.bridgeCommand(command, session: machine.session) {
+            args += [endpoint.destination, peerCommand]
+            return args
+        }
         // Find Herdr on PATH or in common installation locations; never install software as
         // a side effect of selecting a machine. Shell quoting keeps profile data literal.
         let script = executableDiscoveryScript(session: machine.session) + "\n"

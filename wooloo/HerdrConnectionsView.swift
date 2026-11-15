@@ -91,6 +91,9 @@ struct HerdrConnectionsView: View {
                             Text(status(connection)).font(.caption).foregroundStyle(.secondary)
                             Text(opened(connection) == nil ? "Not open in this window" : "Open in this window")
                                 .font(.caption)
+                            if let machine = connection.machine, PeerMachine.isPeer(machine) {
+                                PeerLinkRow(machine: machine)
+                            }
                             if connection.machine == nil, let peers = presence[connection.session], !peers.isEmpty {
                                 Text("Attached: " + peers.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
                             }
