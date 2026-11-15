@@ -1,0 +1,3844 @@
+{
+ "format": 1,
+ "max_future_ms": 600000,
+ "about": "Generated from an independent Python model of docs/sync-protocol.md. Every implementation must reproduce these results.",
+ "hlc": [
+  {
+   "name": "tick advances with wall time and counts within a millisecond",
+   "start": {
+    "wall": 0,
+    "counter": 0
+   },
+   "steps": [
+    {
+     "op": "tick",
+     "now": 1763112000000,
+     "expect": {
+      "wall": 1763112000000,
+      "counter": 0
+     }
+    },
+    {
+     "op": "tick",
+     "now": 1763112000000,
+     "expect": {
+      "wall": 1763112000000,
+      "counter": 1
+     }
+    },
+    {
+     "op": "tick",
+     "now": 1763111999995,
+     "expect": {
+      "wall": 1763112000000,
+      "counter": 2
+     }
+    },
+    {
+     "op": "tick",
+     "now": 1763112000001,
+     "expect": {
+      "wall": 1763112000001,
+      "counter": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "observe raises the clock, later ticks stay ahead",
+   "start": {
+    "wall": 1763112000000,
+    "counter": 3
+   },
+   "steps": [
+    {
+     "op": "observe",
+     "remote": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "expect": {
+      "wall": 1763112000000,
+      "counter": 3
+     }
+    },
+    {
+     "op": "observe",
+     "remote": {
+      "wall": 1763112000000,
+      "counter": 4
+     },
+     "expect": {
+      "wall": 1763112000000,
+      "counter": 4
+     }
+    },
+    {
+     "op": "observe",
+     "remote": {
+      "wall": 1763112000500,
+      "counter": 0
+     },
+     "expect": {
+      "wall": 1763112000500,
+      "counter": 0
+     }
+    },
+    {
+     "op": "tick",
+     "now": 1763112000100,
+     "expect": {
+      "wall": 1763112000500,
+      "counter": 1
+     }
+    },
+    {
+     "op": "tick",
+     "now": 1763112000501,
+     "expect": {
+      "wall": 1763112000501,
+      "counter": 0
+     }
+    }
+   ]
+  }
+ ],
+ "canonical": [
+  {
+   "value": "plain",
+   "text": "\"plain\""
+  },
+  {
+   "value": "quote \" backslash \\ slash /",
+   "text": "\"quote \\\" backslash \\\\ slash /\""
+  },
+  {
+   "value": "ctl \n\t\r\b\f \u0001 \u001f del ",
+   "text": "\"ctl \\n\\t\\r\\b\\f \\u0001 \\u001f del \""
+  },
+  {
+   "value": "café 😀",
+   "text": "\"café 😀\""
+  },
+  {
+   "value": null,
+   "text": "null"
+  },
+  {
+   "value": true,
+   "text": "true"
+  },
+  {
+   "value": false,
+   "text": "false"
+  },
+  {
+   "value": 7,
+   "text": "7"
+  },
+  {
+   "value": -3,
+   "text": "-3"
+  },
+  {
+   "value": 2.5,
+   "text": "2.5"
+  },
+  {
+   "value": 0.1,
+   "text": "0.1"
+  },
+  {
+   "value": [
+    "shell",
+    "logs"
+   ],
+   "text": "[\"shell\",\"logs\"]"
+  },
+  {
+   "value": [],
+   "text": "[]"
+  }
+ ],
+ "compare": [
+  {
+   "name": "bigger wall wins",
+   "a": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "A",
+    "hlc": {
+     "wall": 1763112000001,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "b": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "B",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "win-07be55d1"
+   },
+   "winner": "a"
+  },
+  {
+   "name": "wall beats counter",
+   "a": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "A",
+    "hlc": {
+     "wall": 1763112000001,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "b": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "B",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 9
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "winner": "a"
+  },
+  {
+   "name": "bigger counter wins",
+   "a": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "A",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 1
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "b": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "B",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 2
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "winner": "b"
+  },
+  {
+   "name": "node bytes break hlc ties",
+   "a": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "A",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "b": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "B",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "win-07be55d1"
+   },
+   "winner": "b"
+  },
+  {
+   "name": "value text breaks full ties",
+   "a": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "Alpha",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "b": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "Beta",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "winner": "b"
+  },
+  {
+   "name": "value bytes, lowercase above uppercase",
+   "a": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "a",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "b": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "B",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "winner": "a"
+  },
+  {
+   "name": "null text \"null\" sorts above a string",
+   "a": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "notes",
+    "value": "x",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "b": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "notes",
+    "value": null,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "winner": "b"
+  },
+  {
+   "name": "identical registers are equal",
+   "a": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "A",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "b": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "A",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "winner": "equal"
+  }
+ ],
+ "validate": [
+  {
+   "name": "name",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "Study Central",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "name 200 chars",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "name 200 two-byte chars",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "name 200 astral chars",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "name 201 chars",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "name empty",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "name newline",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "a\nb",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "name DEL",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "ab",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "name number",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": 5,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "name null",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": null,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "category",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "category",
+    "value": "school",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "category null",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "category",
+    "value": null,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "category 65",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "category",
+    "value": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "color",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "color",
+    "value": "#a1b2c3",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "color null",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "color",
+    "value": null,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "color uppercase",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "color",
+    "value": "#A1B2C3",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "color name",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "color",
+    "value": "red",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "order fractional",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "order",
+    "value": 2.5,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "order negative int",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "order",
+    "value": -1,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "order string",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "order",
+    "value": "1",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "order null",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "order",
+    "value": null,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "notes with newline and tab",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "notes",
+    "value": "line 1\n\tline 2\r\n",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "notes null",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "notes",
+    "value": null,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "notes control char",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "notes",
+    "value": "a\u0001b",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "notes DEL",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "notes",
+    "value": "ab",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "pinned_tabs",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "pinned_tabs",
+    "value": [
+     "shell",
+     "logs"
+    ],
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "pinned_tabs empty",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "pinned_tabs",
+    "value": [],
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "pinned_tabs null",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "pinned_tabs",
+    "value": null,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "pinned_tabs 64",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "pinned_tabs",
+    "value": [
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t"
+    ],
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "pinned_tabs 65",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "pinned_tabs",
+    "value": [
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t",
+     "t"
+    ],
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "pinned_tabs empty label",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "pinned_tabs",
+    "value": [
+     ""
+    ],
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "pinned_tabs not array",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "pinned_tabs",
+    "value": "shell",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "pinned_tabs number item",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "pinned_tabs",
+    "value": [
+     1
+    ],
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "host",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "host",
+    "value": "win-07be55d1",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "host uppercase",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "host",
+    "value": "Mac-1",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "host null",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "host",
+    "value": null,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "herdr_id",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "herdr_id",
+    "value": "w3",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "herdr_id punctuation",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "herdr_id",
+    "value": "ws_1.a:b-c",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "herdr_id space",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "herdr_id",
+    "value": "w 3",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "herdr_id 65",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "herdr_id",
+    "value": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "deleted true",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "deleted",
+    "value": true,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "deleted false",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "deleted",
+    "value": false,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "deleted string",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "deleted",
+    "value": "true",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "deleted null",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "deleted",
+    "value": null,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "unknown field",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "path",
+    "value": "/Users/x",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "unknown key kind",
+   "op": {
+    "key": "secret:token",
+    "field": "value",
+    "value": "x",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "uppercase uuid",
+   "op": {
+    "key": "space:6F1C7A52-3B0E-4D8E-9A51-2A8F1C0D9E11",
+    "field": "name",
+    "value": "A",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "short uuid",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e1",
+    "field": "name",
+    "value": "A",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "uuid without dashes",
+   "op": {
+    "key": "space:6f1c7a523b0e4d8e9a512a8f1c0d9e11aaaa",
+    "field": "name",
+    "value": "A",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "bad node",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "A",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "MAC"
+   },
+   "valid": false
+  },
+  {
+   "name": "empty node",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "A",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": ""
+   },
+   "valid": false
+  },
+  {
+   "name": "node 65",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "name",
+    "value": "A",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "valid": false
+  },
+  {
+   "name": "unitcat",
+   "op": {
+    "key": "unitcat:study central",
+    "field": "category",
+    "value": "school",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "unitcat null",
+   "op": {
+    "key": "unitcat:study central",
+    "field": "category",
+    "value": null,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  },
+  {
+   "name": "unitcat empty name",
+   "op": {
+    "key": "unitcat:",
+    "field": "category",
+    "value": "school",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "unitcat other field",
+   "op": {
+    "key": "unitcat:study central",
+    "field": "color",
+    "value": "#000000",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "unitcat category 65",
+   "op": {
+    "key": "unitcat:x",
+    "field": "category",
+    "value": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "unitcat name newline",
+   "op": {
+    "key": "unitcat:a\nb",
+    "field": "category",
+    "value": "misc",
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "deleted number 1",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "deleted",
+    "value": 1,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "deleted number 0",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "deleted",
+    "value": 0,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "order boolean true",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "order",
+    "value": true,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "order boolean false",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "order",
+    "value": false,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": false
+  },
+  {
+   "name": "order float",
+   "op": {
+    "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+    "field": "order",
+    "value": 2.5,
+    "hlc": {
+     "wall": 1763112000000,
+     "counter": 0
+    },
+    "node": "mac-3f9a21c0"
+   },
+   "valid": true
+  }
+ ],
+ "merge": [
+  {
+   "name": "later wall wins a concurrent rename",
+   "now": 1763112000100,
+   "ops": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "B",
+     "hlc": {
+      "wall": 1763112000005,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "B",
+     "hlc": {
+      "wall": 1763112000005,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_rejected": 0,
+   "expect_clock": {
+    "wall": 1763112000005,
+    "counter": 0
+   },
+   "expect_live_spaces": [
+    "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+   ]
+  },
+  {
+   "name": "node breaks a same-hlc tie",
+   "now": 1763112000100,
+   "ops": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "B",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "B",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_rejected": 0,
+   "expect_clock": {
+    "wall": 1763112000000,
+    "counter": 0
+   },
+   "expect_live_spaces": [
+    "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+   ]
+  },
+  {
+   "name": "fields of one Space merge independently",
+   "now": 1763112000100,
+   "ops": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "color",
+     "value": "#112233",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "notes",
+     "value": "from win",
+     "hlc": {
+      "wall": 1763112000001,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "Mac name",
+     "hlc": {
+      "wall": 1763112000002,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "Win name",
+     "hlc": {
+      "wall": 1763112000001,
+      "counter": 1
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "color",
+     "value": "#112233",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "Mac name",
+     "hlc": {
+      "wall": 1763112000002,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "notes",
+     "value": "from win",
+     "hlc": {
+      "wall": 1763112000001,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_rejected": 0,
+   "expect_clock": {
+    "wall": 1763112000002,
+    "counter": 0
+   },
+   "expect_live_spaces": [
+    "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+   ]
+  },
+  {
+   "name": "delete wins over a later field edit",
+   "now": 1763112000100,
+   "ops": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "deleted",
+     "value": true,
+     "hlc": {
+      "wall": 1763112000010,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "notes",
+     "value": null,
+     "hlc": {
+      "wall": 1763112000010,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "pinned_tabs",
+     "value": null,
+     "hlc": {
+      "wall": 1763112000010,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "late",
+     "hlc": {
+      "wall": 1763112000020,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "deleted",
+     "value": true,
+     "hlc": {
+      "wall": 1763112000010,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "late",
+     "hlc": {
+      "wall": 1763112000020,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "notes",
+     "value": null,
+     "hlc": {
+      "wall": 1763112000010,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "pinned_tabs",
+     "value": null,
+     "hlc": {
+      "wall": 1763112000010,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_rejected": 0,
+   "expect_clock": {
+    "wall": 1763112000020,
+    "counter": 0
+   },
+   "expect_live_spaces": []
+  },
+  {
+   "name": "explicit deleted=false with a bigger hlc restores",
+   "now": 1763112000100,
+   "ops": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "deleted",
+     "value": true,
+     "hlc": {
+      "wall": 1763112000001,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "deleted",
+     "value": false,
+     "hlc": {
+      "wall": 1763112000002,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "name",
+     "value": "B",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_registers": [
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "name",
+     "value": "B",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "deleted",
+     "value": false,
+     "hlc": {
+      "wall": 1763112000002,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_rejected": 0,
+   "expect_clock": {
+    "wall": 1763112000002,
+    "counter": 0
+   },
+   "expect_live_spaces": [
+    "0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+    "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+   ]
+  },
+  {
+   "name": "skew guard: 10 min ahead accepted, beyond rejected and not observed",
+   "now": 1763112000000,
+   "ops": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "edge",
+     "hlc": {
+      "wall": 1763112600000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "color",
+     "value": "#ffffff",
+     "hlc": {
+      "wall": 1763112600001,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "order",
+     "value": 1,
+     "hlc": {
+      "wall": 1763111999950,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "edge",
+     "hlc": {
+      "wall": 1763112600000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "order",
+     "value": 1,
+     "hlc": {
+      "wall": 1763111999950,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_rejected": 1,
+   "expect_clock": {
+    "wall": 1763112600000,
+    "counter": 0
+   },
+   "expect_live_spaces": [
+    "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+   ]
+  },
+  {
+   "name": "invalid ops are rejected and do not move the clock",
+   "now": 1763112000100,
+   "ops": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "path",
+     "value": "/tmp",
+     "hlc": {
+      "wall": 1763112000050,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "ok",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:nope",
+     "field": "name",
+     "value": "x",
+     "hlc": {
+      "wall": 1763112000060,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "ok",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_rejected": 2,
+   "expect_clock": {
+    "wall": 1763112000000,
+    "counter": 0
+   },
+   "expect_live_spaces": [
+    "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+   ]
+  },
+  {
+   "name": "duplicates are no-ops",
+   "now": 1763112000100,
+   "ops": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "order",
+     "value": 3,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "order",
+     "value": 3,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_rejected": 0,
+   "expect_clock": {
+    "wall": 1763112000000,
+    "counter": 1
+   },
+   "expect_live_spaces": [
+    "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+   ]
+  },
+  {
+   "name": "unit category removal is a null register",
+   "now": 1763112000100,
+   "ops": [
+    {
+     "key": "unitcat:study central",
+     "field": "category",
+     "value": "school",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "unitcat:study central",
+     "field": "category",
+     "value": null,
+     "hlc": {
+      "wall": 1763112000001,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "unitcat:finance explorer",
+     "field": "category",
+     "value": "finance",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_registers": [
+    {
+     "key": "unitcat:finance explorer",
+     "field": "category",
+     "value": "finance",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "unitcat:study central",
+     "field": "category",
+     "value": null,
+     "hlc": {
+      "wall": 1763112000001,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_rejected": 0,
+   "expect_clock": {
+    "wall": 1763112000001,
+    "counter": 0
+   },
+   "expect_live_spaces": []
+  }
+ ],
+ "exchange": [
+  {
+   "name": "offline edits on both sides merge both ways",
+   "now": 1763112001000,
+   "initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "color",
+     "value": "#112233",
+     "hlc": {
+      "wall": 1763112000010,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "notes",
+     "value": "hi",
+     "hlc": {
+      "wall": 1763112000020,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_reply": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "notes",
+     "value": "hi",
+     "hlc": {
+      "wall": 1763112000020,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_accepted": 2,
+   "expect_rejected": 0,
+   "expect_initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "color",
+     "value": "#112233",
+     "hlc": {
+      "wall": 1763112000010,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "notes",
+     "value": "hi",
+     "hlc": {
+      "wall": 1763112000020,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "color",
+     "value": "#112233",
+     "hlc": {
+      "wall": 1763112000010,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "notes",
+     "value": "hi",
+     "hlc": {
+      "wall": 1763112000020,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ]
+  },
+  {
+   "name": "responder has the newer value",
+   "now": 1763112001000,
+   "initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "W",
+     "hlc": {
+      "wall": 1763112000005,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "M",
+     "hlc": {
+      "wall": 1763112000007,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_reply": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "M",
+     "hlc": {
+      "wall": 1763112000007,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_accepted": 1,
+   "expect_rejected": 0,
+   "expect_initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "M",
+     "hlc": {
+      "wall": 1763112000007,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "M",
+     "hlc": {
+      "wall": 1763112000007,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ]
+  },
+  {
+   "name": "initiator has the newer value",
+   "now": 1763112001000,
+   "initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "W",
+     "hlc": {
+      "wall": 1763112000009,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "unitcat:a",
+     "field": "category",
+     "value": "misc",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "M",
+     "hlc": {
+      "wall": 1763112000007,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_reply": [],
+   "expect_accepted": 2,
+   "expect_rejected": 0,
+   "expect_initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "W",
+     "hlc": {
+      "wall": 1763112000009,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "unitcat:a",
+     "field": "category",
+     "value": "misc",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "W",
+     "hlc": {
+      "wall": 1763112000009,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "unitcat:a",
+     "field": "category",
+     "value": "misc",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ]
+  },
+  {
+   "name": "op too far in the future is deferred",
+   "now": 1763112000000,
+   "initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "ahead",
+     "hlc": {
+      "wall": 1763112700000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "order",
+     "value": 2,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "M",
+     "hlc": {
+      "wall": 1763111999990,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_reply": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "M",
+     "hlc": {
+      "wall": 1763111999990,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_accepted": 1,
+   "expect_rejected": 1,
+   "expect_initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "ahead",
+     "hlc": {
+      "wall": 1763112700000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "order",
+     "value": 2,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "M",
+     "hlc": {
+      "wall": 1763111999990,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "order",
+     "value": 2,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ]
+  },
+  {
+   "name": "identical documents send nothing back",
+   "now": 1763112001000,
+   "initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_reply": [],
+   "expect_accepted": 1,
+   "expect_rejected": 0,
+   "expect_initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ]
+  },
+  {
+   "name": "empty initiator receives everything",
+   "now": 1763112001000,
+   "initiator": [],
+   "responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "deleted",
+     "value": true,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 3
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_reply": [
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "deleted",
+     "value": true,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 3
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_accepted": 0,
+   "expect_rejected": 0,
+   "expect_initiator": [
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "deleted",
+     "value": true,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 3
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_responder": [
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "deleted",
+     "value": true,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 3
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "A",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ]
+  },
+  {
+   "name": "invalid initiator ops are rejected and not stored",
+   "now": 1763112001000,
+   "initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "color",
+     "value": "red",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "name",
+     "value": "",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "ok",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "responder": [],
+   "expect_reply": [],
+   "expect_accepted": 1,
+   "expect_rejected": 2,
+   "expect_initiator": [
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "name",
+     "value": "",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "color",
+     "value": "red",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "ok",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "ok",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "win-07be55d1"
+    }
+   ]
+  },
+  {
+   "name": "delete newer than a rename propagates",
+   "now": 1763112001000,
+   "initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "deleted",
+     "value": true,
+     "hlc": {
+      "wall": 1763112000010,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "renamed",
+     "hlc": {
+      "wall": 1763112000005,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_reply": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "renamed",
+     "hlc": {
+      "wall": 1763112000005,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_accepted": 1,
+   "expect_rejected": 0,
+   "expect_initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "deleted",
+     "value": true,
+     "hlc": {
+      "wall": 1763112000010,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "renamed",
+     "hlc": {
+      "wall": 1763112000005,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "deleted",
+     "value": true,
+     "hlc": {
+      "wall": 1763112000010,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "renamed",
+     "hlc": {
+      "wall": 1763112000005,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ]
+  },
+  {
+   "name": "same hlc: bigger node id wins",
+   "now": 1763112001000,
+   "initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "W",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "M",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_reply": [],
+   "expect_accepted": 1,
+   "expect_rejected": 0,
+   "expect_initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "W",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "W",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ]
+  },
+  {
+   "name": "same hlc and node: bigger canonical value wins",
+   "now": 1763112001000,
+   "initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "b",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "order",
+     "value": 2,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "a",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "order",
+     "value": 10,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_reply": [],
+   "expect_accepted": 2,
+   "expect_rejected": 0,
+   "expect_initiator": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "b",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "order",
+     "value": 2,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_responder": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "b",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "order",
+     "value": 2,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ]
+  },
+  {
+   "name": "unit category removal propagates",
+   "now": 1763112001000,
+   "initiator": [
+    {
+     "key": "unitcat:study central",
+     "field": "category",
+     "value": null,
+     "hlc": {
+      "wall": 1763112000005,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "responder": [
+    {
+     "key": "unitcat:study central",
+     "field": "category",
+     "value": "school",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "unitcat:finance explorer",
+     "field": "category",
+     "value": "finance",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_reply": [
+    {
+     "key": "unitcat:finance explorer",
+     "field": "category",
+     "value": "finance",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect_accepted": 1,
+   "expect_rejected": 0,
+   "expect_initiator": [
+    {
+     "key": "unitcat:finance explorer",
+     "field": "category",
+     "value": "finance",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "unitcat:study central",
+     "field": "category",
+     "value": null,
+     "hlc": {
+      "wall": 1763112000005,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ],
+   "expect_responder": [
+    {
+     "key": "unitcat:finance explorer",
+     "field": "category",
+     "value": "finance",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "unitcat:study central",
+     "field": "category",
+     "value": null,
+     "hlc": {
+      "wall": 1763112000005,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    }
+   ]
+  }
+ ],
+ "binding": [
+  {
+   "name": "bound by herdr_id even after a rename",
+   "node": "mac-3f9a21c0",
+   "registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "host",
+     "value": "mac-3f9a21c0",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "herdr_id",
+     "value": "w1",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "Alpha",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "workspaces": [
+    {
+     "herdr_id": "w1",
+     "label": "Alpha renamed"
+    }
+   ],
+   "expect": [
+    {
+     "herdr_id": "w1",
+     "label": "Alpha renamed",
+     "kind": "bound",
+     "space": "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+    }
+   ],
+   "expect_orphans": []
+  },
+  {
+   "name": "rebind by name after Herdr renumbered",
+   "node": "mac-3f9a21c0",
+   "registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "host",
+     "value": "mac-3f9a21c0",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "herdr_id",
+     "value": "w1",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "Alpha",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "host",
+     "value": "mac-3f9a21c0",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "herdr_id",
+     "value": "w2",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "name",
+     "value": "Beta",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "workspaces": [
+    {
+     "herdr_id": "w5",
+     "label": "Beta"
+    },
+    {
+     "herdr_id": "w1",
+     "label": "Alpha"
+    }
+   ],
+   "expect": [
+    {
+     "herdr_id": "w5",
+     "label": "Beta",
+     "kind": "rebound",
+     "space": "0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d"
+    },
+    {
+     "herdr_id": "w1",
+     "label": "Alpha",
+     "kind": "bound",
+     "space": "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+    }
+   ],
+   "expect_orphans": []
+  },
+  {
+   "name": "no rebind onto a Space whose workspace still exists",
+   "node": "mac-3f9a21c0",
+   "registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "host",
+     "value": "mac-3f9a21c0",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "herdr_id",
+     "value": "w1",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "Alpha",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "workspaces": [
+    {
+     "herdr_id": "w2",
+     "label": "Alpha"
+    },
+    {
+     "herdr_id": "w1",
+     "label": "Other"
+    }
+   ],
+   "expect": [
+    {
+     "herdr_id": "w2",
+     "label": "Alpha",
+     "kind": "minted",
+     "space": null
+    },
+    {
+     "herdr_id": "w1",
+     "label": "Other",
+     "kind": "bound",
+     "space": "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+    }
+   ],
+   "expect_orphans": []
+  },
+  {
+   "name": "peer-hosted and deleted Spaces are not candidates; unbound ones are orphans",
+   "node": "mac-3f9a21c0",
+   "registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "host",
+     "value": "win-07be55d1",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "herdr_id",
+     "value": "w1",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "Alpha",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "host",
+     "value": "mac-3f9a21c0",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "herdr_id",
+     "value": "w9",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "name",
+     "value": "Gone",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "deleted",
+     "value": true,
+     "hlc": {
+      "wall": 1763112000001,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:c3d4e5f6-a7b8-4c9d-8e0f-112233445566",
+     "field": "host",
+     "value": "mac-3f9a21c0",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:c3d4e5f6-a7b8-4c9d-8e0f-112233445566",
+     "field": "herdr_id",
+     "value": "w7",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:c3d4e5f6-a7b8-4c9d-8e0f-112233445566",
+     "field": "name",
+     "value": "Kept",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "workspaces": [
+    {
+     "herdr_id": "w1",
+     "label": "Alpha"
+    }
+   ],
+   "expect": [
+    {
+     "herdr_id": "w1",
+     "label": "Alpha",
+     "kind": "minted",
+     "space": null
+    }
+   ],
+   "expect_orphans": [
+    "c3d4e5f6-a7b8-4c9d-8e0f-112233445566"
+   ]
+  },
+  {
+   "name": "two Spaces with the same name: smallest uuid rebinds",
+   "node": "mac-3f9a21c0",
+   "registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "host",
+     "value": "mac-3f9a21c0",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "herdr_id",
+     "value": "w8",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "Dup",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "host",
+     "value": "mac-3f9a21c0",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "herdr_id",
+     "value": "w9",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d",
+     "field": "name",
+     "value": "Dup",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "workspaces": [
+    {
+     "herdr_id": "w1",
+     "label": "Dup"
+    }
+   ],
+   "expect": [
+    {
+     "herdr_id": "w1",
+     "label": "Dup",
+     "kind": "rebound",
+     "space": "0a6b8c3d-1e2f-4a5b-8c7d-9e0f1a2b3c4d"
+    }
+   ],
+   "expect_orphans": [
+    "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+   ]
+  },
+  {
+   "name": "empty document mints everything",
+   "node": "mac-3f9a21c0",
+   "registers": [],
+   "workspaces": [
+    {
+     "herdr_id": "w1",
+     "label": "One"
+    },
+    {
+     "herdr_id": "w2",
+     "label": "Two"
+    }
+   ],
+   "expect": [
+    {
+     "herdr_id": "w1",
+     "label": "One",
+     "kind": "minted",
+     "space": null
+    },
+    {
+     "herdr_id": "w2",
+     "label": "Two",
+     "kind": "minted",
+     "space": null
+    }
+   ],
+   "expect_orphans": []
+  },
+  {
+   "name": "name match is exact and case-sensitive",
+   "node": "mac-3f9a21c0",
+   "registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "host",
+     "value": "mac-3f9a21c0",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "herdr_id",
+     "value": "w1",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "Alpha",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "workspaces": [
+    {
+     "herdr_id": "w2",
+     "label": "alpha"
+    },
+    {
+     "herdr_id": "w3",
+     "label": "Alpha "
+    }
+   ],
+   "expect": [
+    {
+     "herdr_id": "w2",
+     "label": "alpha",
+     "kind": "minted",
+     "space": null
+    },
+    {
+     "herdr_id": "w3",
+     "label": "Alpha ",
+     "kind": "minted",
+     "space": null
+    }
+   ],
+   "expect_orphans": [
+    "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+   ]
+  },
+  {
+   "name": "two workspaces with the same label: the first rebinds",
+   "node": "mac-3f9a21c0",
+   "registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "host",
+     "value": "mac-3f9a21c0",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "herdr_id",
+     "value": "w1",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "Dup",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "workspaces": [
+    {
+     "herdr_id": "w5",
+     "label": "Dup"
+    },
+    {
+     "herdr_id": "w6",
+     "label": "Dup"
+    }
+   ],
+   "expect": [
+    {
+     "herdr_id": "w5",
+     "label": "Dup",
+     "kind": "rebound",
+     "space": "6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11"
+    },
+    {
+     "herdr_id": "w6",
+     "label": "Dup",
+     "kind": "minted",
+     "space": null
+    }
+   ],
+   "expect_orphans": []
+  },
+  {
+   "name": "a deleted Space is not bound even when its herdr_id matches",
+   "node": "mac-3f9a21c0",
+   "registers": [
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "host",
+     "value": "mac-3f9a21c0",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "herdr_id",
+     "value": "w1",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "name",
+     "value": "Alpha",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 2
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "deleted",
+     "value": true,
+     "hlc": {
+      "wall": 1763112000001,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "workspaces": [
+    {
+     "herdr_id": "w1",
+     "label": "Alpha"
+    }
+   ],
+   "expect": [
+    {
+     "herdr_id": "w1",
+     "label": "Alpha",
+     "kind": "minted",
+     "space": null
+    }
+   ],
+   "expect_orphans": []
+  }
+ ],
+ "unitcat_import": [
+  {
+   "name": "first import",
+   "snapshot": {},
+   "file": {
+    "finance explorer": "finance"
+   },
+   "expect_ops": [
+    {
+     "key": "unitcat:finance explorer",
+     "field": "category",
+     "value": "finance"
+    }
+   ],
+   "expect_snapshot": {
+    "finance explorer": "finance"
+   }
+  },
+  {
+   "name": "missing file does nothing",
+   "snapshot": {
+    "a": "school"
+   },
+   "file": null,
+   "expect_ops": [],
+   "expect_snapshot": {
+    "a": "school"
+   }
+  },
+  {
+   "name": "added, changed and removed entries",
+   "snapshot": {
+    "a": "school",
+    "b": "misc"
+   },
+   "file": {
+    "a": "claude",
+    "c": "creative"
+   },
+   "expect_ops": [
+    {
+     "key": "unitcat:a",
+     "field": "category",
+     "value": "claude"
+    },
+    {
+     "key": "unitcat:b",
+     "field": "category",
+     "value": null
+    },
+    {
+     "key": "unitcat:c",
+     "field": "category",
+     "value": "creative"
+    }
+   ],
+   "expect_snapshot": {
+    "a": "claude",
+    "c": "creative"
+   }
+  },
+  {
+   "name": "unchanged file sends nothing",
+   "snapshot": {
+    "a": "school"
+   },
+   "file": {
+    "a": "school"
+   },
+   "expect_ops": [],
+   "expect_snapshot": {
+    "a": "school"
+   }
+  },
+  {
+   "name": "invalid entries are skipped",
+   "snapshot": {},
+   "file": {
+    "x": 5,
+    "": "misc",
+    "ok": "finance",
+    "y": "bad\nnl",
+    "z": ""
+   },
+   "expect_ops": [
+    {
+     "key": "unitcat:ok",
+     "field": "category",
+     "value": "finance"
+    }
+   ],
+   "expect_snapshot": {
+    "ok": "finance"
+   }
+  }
+ ],
+ "unitcat_export": [
+  {
+   "name": "non-null unitcat registers only",
+   "registers": [
+    {
+     "key": "unitcat:a",
+     "field": "category",
+     "value": "school",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "unitcat:b",
+     "field": "category",
+     "value": null,
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    },
+    {
+     "key": "unitcat:study central",
+     "field": "category",
+     "value": "school",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 1
+     },
+     "node": "win-07be55d1"
+    },
+    {
+     "key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11",
+     "field": "category",
+     "value": "claude",
+     "hlc": {
+      "wall": 1763112000000,
+      "counter": 0
+     },
+     "node": "mac-3f9a21c0"
+    }
+   ],
+   "expect": {
+    "a": "school",
+    "study central": "school"
+   }
+  }
+ ],
+ "hello": [
+  {
+   "name": "hello without herdr_version",
+   "own": "win-07be55d1",
+   "line": "{\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": true,
+   "expect_peer": "mac-3f9a21c0",
+   "expect_herdr_version": null,
+   "wire": true
+  },
+  {
+   "name": "hello with herdr_version",
+   "own": "win-07be55d1",
+   "line": "{\"herdr_version\":\"0.9.5\",\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": true,
+   "expect_peer": "mac-3f9a21c0",
+   "expect_herdr_version": "0.9.5",
+   "wire": true
+  },
+  {
+   "name": "herdr_version with build metadata",
+   "own": "win-07be55d1",
+   "line": "{\"herdr_version\":\"1.2.3-rc.1+git.abc\",\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": true,
+   "expect_peer": "mac-3f9a21c0",
+   "expect_herdr_version": "1.2.3-rc.1+git.abc",
+   "wire": true
+  },
+  {
+   "name": "herdr_version of 32 bytes",
+   "own": "win-07be55d1",
+   "line": "{\"herdr_version\":\"1.000000000000000000000000000000\",\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": true,
+   "expect_peer": "mac-3f9a21c0",
+   "expect_herdr_version": "1.000000000000000000000000000000",
+   "wire": true
+  },
+  {
+   "name": "herdr_version number is ignored",
+   "own": "win-07be55d1",
+   "line": "{\"herdr_version\":95,\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": true,
+   "expect_peer": "mac-3f9a21c0",
+   "expect_herdr_version": null,
+   "wire": false
+  },
+  {
+   "name": "herdr_version null is ignored",
+   "own": "win-07be55d1",
+   "line": "{\"herdr_version\":null,\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": true,
+   "expect_peer": "mac-3f9a21c0",
+   "expect_herdr_version": null,
+   "wire": false
+  },
+  {
+   "name": "herdr_version empty is ignored",
+   "own": "win-07be55d1",
+   "line": "{\"herdr_version\":\"\",\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": true,
+   "expect_peer": "mac-3f9a21c0",
+   "expect_herdr_version": null,
+   "wire": false
+  },
+  {
+   "name": "herdr_version of 33 bytes is ignored",
+   "own": "win-07be55d1",
+   "line": "{\"herdr_version\":\"1.0000000000000000000000000000000\",\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": true,
+   "expect_peer": "mac-3f9a21c0",
+   "expect_herdr_version": null,
+   "wire": false
+  },
+  {
+   "name": "herdr_version with a semicolon is ignored",
+   "own": "win-07be55d1",
+   "line": "{\"herdr_version\":\"1;rm\",\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": true,
+   "expect_peer": "mac-3f9a21c0",
+   "expect_herdr_version": null,
+   "wire": false
+  },
+  {
+   "name": "herdr_version with a space is ignored",
+   "own": "win-07be55d1",
+   "line": "{\"herdr_version\":\"0.9 5\",\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": true,
+   "expect_peer": "mac-3f9a21c0",
+   "expect_herdr_version": null,
+   "wire": false
+  },
+  {
+   "name": "herdr_version non-ASCII is ignored",
+   "own": "win-07be55d1",
+   "line": "{\"herdr_version\":\"0.9.٥\",\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": true,
+   "expect_peer": "mac-3f9a21c0",
+   "expect_herdr_version": null,
+   "wire": false
+  },
+  {
+   "name": "unknown members are ignored",
+   "own": "win-07be55d1",
+   "line": "{\"digest\":\"abc\",\"herdr_version\":\"0.9.5\",\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": true,
+   "expect_peer": "mac-3f9a21c0",
+   "expect_herdr_version": "0.9.5",
+   "wire": false
+  },
+  {
+   "name": "same node id is refused even with herdr_version",
+   "own": "mac-3f9a21c0",
+   "line": "{\"herdr_version\":\"0.9.5\",\"node\":\"mac-3f9a21c0\",\"proto\":1,\"t\":\"hello\"}",
+   "expect_ok": false,
+   "expect_peer": null,
+   "expect_herdr_version": null,
+   "wire": false
+  },
+  {
+   "name": "proto 2 is refused even with herdr_version",
+   "own": "win-07be55d1",
+   "line": "{\"herdr_version\":\"0.9.5\",\"node\":\"mac-3f9a21c0\",\"proto\":2,\"t\":\"hello\"}",
+   "expect_ok": false,
+   "expect_peer": null,
+   "expect_herdr_version": null,
+   "wire": false
+  }
+ ]
+}
