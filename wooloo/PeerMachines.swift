@@ -22,6 +22,34 @@ enum PeerMachine {
         }
     }
 
+    /// Profiles synthesized from `~/.ssh/wooloo_peers/<id>.conf`, read-only: Herdr's own machine
+    /// catalog cannot hold a peer, since Herdr always multiplexes and the bridge refuses that.
+    /// Confs written before pairing recorded a label or session fall back to the id and `default`.
+    static func profiles(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [HerdrMachineProfile] {
+        let directory = PeerPairing.peersDirectory(home: home)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        return names.filter { $0.hasSuffix(".conf") }.sorted().compactMap { name in
+            let id = String(name.dropLast(".conf".count))
+            guard PeerPairing.matches(id, #"^[a-z0-9-]{1,32}$"#),
+                  let text = try? String(contentsOf: directory.appendingPathComponent(name), encoding: .utf8) else { return nil }
+            return profile(id: id, conf: text)
+        }
+    }
+
+    static func profile(id: String, conf: String) -> HerdrMachineProfile {
+        func comment(_ key: String) -> String? {
+            conf.split(whereSeparator: \.isNewline).lazy
+                .compactMap { line -> String? in
+                    let prefix = "# wooloo-\(key) "
+                    return line.hasPrefix(prefix) ? String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces) : nil
+                }.first
+        }
+        let session = comment("session").flatMap { PeerPairing.isValidSession($0) ? $0 : nil } ?? "default"
+        let label = comment("label").flatMap { $0.isEmpty ? nil : $0 } ?? id
+        let alias = aliasPrefix + id
+        return HerdrMachineProfile(id: alias, label: label, target: alias, session: session, enabled: true)
+    }
+
     static let helloCommand = "wooloo-peer hello"
 
     /// `wooloo-peer hello` answers `wooloo-peer-bridge-v1 <herdr version>`.

@@ -35,6 +35,15 @@ extension WorkspaceFiles {
 
     /// Delegate persistence and remote preparation to Herdr, which owns machine profiles.
     @available(*, noasync, message: "Blocks its thread: call it inside BlockingWork.run")
+    /// One shared connection per machine, kept for a minute, instead of a handshake per command.
+    /// A paired computer never shares one: Windows OpenSSH runs the first command of a
+    /// multiplexed connection for every later session, which the restricted bridge cannot serve.
+    static func sshMultiplexOptions(for machine: HerdrMachineProfile) -> [String] {
+        if PeerMachine.isPeer(machine) { return ["-o", "ControlMaster=no", "-o", "ControlPath=none"] }
+        guard let directory = sshControlDirectory else { return [] }
+        return ["-o", "ControlMaster=auto", "-o", "ControlPath=\(directory)/%C", "-o", "ControlPersist=60"]
+    }
+
     static func manageMachine(_ arguments: [String]) throws {
         _ = try run(herdrExecutable(), ["machine"] + arguments, input: Data(),
                     limit: 200_000, timeout: 120, label: "herdr-machine")
@@ -148,10 +157,7 @@ extension WorkspaceFiles {
         assert(BlockingWork.holdsSlot(of: BlockingWorkMachine(machine)),
                "An SSH command for \(machine.target) runs in a slot of \(BlockingWork.currentMachine.map(String.init(describing:)) ?? "none"): start it with WorkspaceFiles.blocking(at:) or blocking(on:)")
         var args = ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
-        if let directory = sshControlDirectory {
-            // One connection per machine, kept for a minute, instead of a handshake per command.
-            args += ["-o", "ControlMaster=auto", "-o", "ControlPath=\(directory)/%C", "-o", "ControlPersist=60"]
-        }
+        args += sshMultiplexOptions(for: machine)
         if let port = endpoint.port { args += ["-p", port] }
         args += [target, command]
         return try run(sshExecutable, args, input: input, limit: limit, timeout: timeout, label: label, remote: true)

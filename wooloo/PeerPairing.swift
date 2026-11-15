@@ -340,7 +340,9 @@ enum PeerPairing {
     static func configBlock(_ code: PeerPairingCode) -> String {
         let id = code.peerID
         let endpoint = code.endpoint
-        var lines = ["Host " + alias(id), "    HostName " + endpoint.host]
+        // Comments carry what the profile needs; ssh ignores them (see PeerMachine.profiles).
+        var lines = ["# wooloo-label " + code.label, "# wooloo-session " + code.session,
+                     "Host " + alias(id), "    HostName " + endpoint.host]
         if let user = endpoint.user { lines.append("    User " + user) }
         if let port = endpoint.port { lines.append("    Port \(port)") }
         lines += ["    IdentityFile ~/.ssh/" + deviceKeyName, "    IdentitiesOnly yes", "    HostKeyAlias " + alias(id),

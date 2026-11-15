@@ -127,7 +127,7 @@ final class HerdrConnectionCatalog: ObservableObject {
             var failures: [String] = []
             if let result {
                 switch result.0 {
-                case .success(let profiles): machines = profiles; machinesLoaded = true; generation = request
+                case .success(let profiles): machines = Self.withPeers(profiles); machinesLoaded = true; generation = request
                 case .failure(let failure): failures.append(failure.localizedDescription)
                 }
                 switch result.1 {
@@ -137,6 +137,14 @@ final class HerdrConnectionCatalog: ObservableObject {
             }
             error = failures.isEmpty ? nil : failures.joined(separator: "\n")
         }
+    }
+
+    /// Paired computers come from their ssh conf, not Herdr's catalog; a stale Herdr entry
+    /// for the same alias is replaced.
+    private static func withPeers(_ profiles: [HerdrMachineProfile]) -> [HerdrMachineProfile] {
+        let peers = PeerMachine.profiles()
+        let ids = Set(peers.map(\.id))
+        return profiles.filter { !ids.contains($0.id) } + peers
     }
 
     func freshMachines() async -> [HerdrMachineProfile]? {
@@ -164,7 +172,7 @@ final class HerdrConnectionCatalog: ObservableObject {
                 return try WorkspaceFiles.machines(includeDisabled: true)
             }
         }
-        machines = try result.get()
+        machines = Self.withPeers(try result.get())
         machinesLoaded = true
         generation = UUID()
         error = nil

@@ -145,9 +145,7 @@ final class HerdrRemoteBridge: Sendable {
         let endpoint = WorkspaceFiles.SSHEndpoint(machine.target)
         var args = ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
                     "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=2"]
-        if let directory = WorkspaceFiles.sshControlDirectory {
-            args += ["-o", "ControlMaster=auto", "-o", "ControlPath=\(directory)/%C", "-o", "ControlPersist=60"]
-        }
+        args += WorkspaceFiles.sshMultiplexOptions(for: machine)
         if let port = endpoint.port { args += ["-p", port] }
         // A paired computer's key runs only the dispatcher's allow-listed commands.
         if PeerMachine.isPeer(machine), let peerCommand = PeerMachine.bridgeCommand(command, session: machine.session) {

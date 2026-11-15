@@ -164,12 +164,7 @@ struct PeerPairingView: View {
             }
             if outcome.includeAdded { notes.append("Added the Include line to ~/.ssh/config.") }
             result = notes.joined(separator: " ")
-            do {
-                try await catalog.manage(PeerPairing.machineArguments(for: code))
-                destinations.refresh(catalog.machines)
-            } catch {
-                self.error = "Profile written; Herdr couldn't add it: \(error.localizedDescription)"
-            }
+            if let machines = await catalog.freshMachines() { destinations.refresh(machines) }
         }
     }
 }
