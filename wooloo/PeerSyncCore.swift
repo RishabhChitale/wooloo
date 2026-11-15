@@ -46,16 +46,16 @@ func utf8Equal(_ a: String, _ b: String) -> Bool { a.utf8.elementsEqual(b.utf8) 
 
 // MARK: - JSON value
 
-indirect enum JSONValue: Equatable {
+indirect enum PeerSyncJSONValue: Equatable {
     case null
     case bool(Bool)
     case int(Int64)
     case double(Double)
     case string(String)
-    case array([JSONValue])
-    case object([(String, JSONValue)])
+    case array([PeerSyncJSONValue])
+    case object([(String, PeerSyncJSONValue)])
 
-    static func == (l: JSONValue, r: JSONValue) -> Bool {
+    static func == (l: PeerSyncJSONValue, r: PeerSyncJSONValue) -> Bool {
         PeerSyncJSON.canonical(l) == PeerSyncJSON.canonical(r)
     }
 
@@ -69,10 +69,10 @@ indirect enum JSONValue: Equatable {
         default: return false
         }
     }
-    var objectValue: [(String, JSONValue)]? { if case .object(let o) = self { return o }; return nil }
-    var arrayValue: [JSONValue]? { if case .array(let a) = self { return a }; return nil }
+    var objectValue: [(String, PeerSyncJSONValue)]? { if case .object(let o) = self { return o }; return nil }
+    var arrayValue: [PeerSyncJSONValue]? { if case .array(let a) = self { return a }; return nil }
 
-    subscript(member: String) -> JSONValue? {
+    subscript(member: String) -> PeerSyncJSONValue? {
         guard case .object(let o) = self else { return nil }
         // Last duplicate wins, like serde_json's map.
         return o.last(where: { utf8Equal($0.0, member) })?.1
@@ -92,20 +92,20 @@ indirect enum JSONValue: Equatable {
 enum PeerSyncJSON {
     // MARK: canonical writer
 
-    static func canonical(_ v: JSONValue) -> String {
+    static func canonical(_ v: PeerSyncJSONValue) -> String {
         var out = ""
         write(v, into: &out, sorted: true)
         return out
     }
 
     /// Compact (non-sorted) writer used on the wire; object members keep insertion order.
-    static func compact(_ v: JSONValue) -> String {
+    static func compact(_ v: PeerSyncJSONValue) -> String {
         var out = ""
         write(v, into: &out, sorted: false)
         return out
     }
 
-    private static func write(_ v: JSONValue, into out: inout String, sorted: Bool) {
+    private static func write(_ v: PeerSyncJSONValue, into out: inout String, sorted: Bool) {
         switch v {
         case .null: out += "null"
         case .bool(let b): out += b ? "true" : "false"
@@ -172,7 +172,7 @@ enum PeerSyncJSON {
 
     struct ParseError: Error { let msg: String }
 
-    static func parse(_ text: String) throws -> JSONValue {
+    static func parse(_ text: String) throws -> PeerSyncJSONValue {
         var p = Parser(bytes: Array(text.utf8))
         p.skipWS()
         let v = try p.value(depth: 0)
@@ -192,7 +192,7 @@ enum PeerSyncJSON {
 
         func err(_ m: String) -> ParseError { ParseError(msg: m) }
 
-        mutating func value(depth: Int) throws -> JSONValue {
+        mutating func value(depth: Int) throws -> PeerSyncJSONValue {
             if depth > 128 { throw err("too deep") }
             guard i < b.count else { throw err("unexpected end") }
             switch b[i] {
@@ -202,7 +202,7 @@ enum PeerSyncJSON {
             case UInt8(ascii: "\""): return .string(try string())
             case UInt8(ascii: "["):
                 i += 1
-                var arr: [JSONValue] = []
+                var arr: [PeerSyncJSONValue] = []
                 skipWS()
                 if i < b.count, b[i] == UInt8(ascii: "]") { i += 1; return .array(arr) }
                 while true {
@@ -216,7 +216,7 @@ enum PeerSyncJSON {
                 }
             case UInt8(ascii: "{"):
                 i += 1
-                var obj: [(String, JSONValue)] = []
+                var obj: [(String, PeerSyncJSONValue)] = []
                 skipWS()
                 if i < b.count, b[i] == UInt8(ascii: "}") { i += 1; return .object(obj) }
                 while true {
@@ -246,7 +246,7 @@ enum PeerSyncJSON {
             i += u.count
         }
 
-        mutating func number() throws -> JSONValue {
+        mutating func number() throws -> PeerSyncJSONValue {
             let start = i
             var isInt = true
             if i < b.count, b[i] == UInt8(ascii: "-") { i += 1 }
@@ -334,18 +334,18 @@ enum PeerSyncJSON {
 
 // MARK: - HLC
 
-struct Hlc: Equatable, Comparable {
+struct PeerSyncHlc: Equatable, Comparable {
     var wall: UInt64
     var counter: UInt64
-    static let zero = Hlc(wall: 0, counter: 0)
+    static let zero = PeerSyncHlc(wall: 0, counter: 0)
 
-    static func < (a: Hlc, b: Hlc) -> Bool {
+    static func < (a: PeerSyncHlc, b: PeerSyncHlc) -> Bool {
         a.wall != b.wall ? a.wall < b.wall : a.counter < b.counter
     }
 
-    mutating func tick(now: UInt64) -> Hlc {
+    mutating func tick(now: UInt64) -> PeerSyncHlc {
         if now > wall {
-            self = Hlc(wall: now, counter: 0)
+            self = PeerSyncHlc(wall: now, counter: 0)
         } else {
             let (c, o) = counter.addingReportingOverflow(1)
             self.counter = o ? UInt64.max : c
@@ -353,16 +353,16 @@ struct Hlc: Equatable, Comparable {
         return self
     }
 
-    mutating func observe(_ r: Hlc) {
+    mutating func observe(_ r: PeerSyncHlc) {
         if r > self { self = r }
     }
 
-    static func from(json v: JSONValue) -> Hlc? {
+    static func from(json v: PeerSyncJSONValue) -> PeerSyncHlc? {
         guard let w = v["wall"]?.uint64Value, let c = v["counter"]?.uint64Value else { return nil }
-        return Hlc(wall: w, counter: c)
+        return PeerSyncHlc(wall: w, counter: c)
     }
 
-    var json: JSONValue {
+    var json: PeerSyncJSONValue {
         .object([("wall", .int(Int64(clamping: wall))), ("counter", .int(Int64(clamping: counter)))])
     }
 }
@@ -386,12 +386,12 @@ enum PeerSyncValidate {
         return n >= lo
     }
 
-    private static func valueIsText(_ v: JSONValue, _ lo: Int, _ hi: Int) -> Bool {
+    private static func valueIsText(_ v: PeerSyncJSONValue, _ lo: Int, _ hi: Int) -> Bool {
         if case .string(let s) = v { return isText(s, lo, hi) }
         return false
     }
 
-    private static func nullOrText(_ v: JSONValue, _ lo: Int, _ hi: Int) -> Bool {
+    private static func nullOrText(_ v: PeerSyncJSONValue, _ lo: Int, _ hi: Int) -> Bool {
         v.isNull || valueIsText(v, lo, hi)
     }
 
@@ -440,7 +440,7 @@ enum PeerSyncValidate {
         return nil
     }
 
-    static func validValue(_ kind: KeyKind, field: String, value: JSONValue) -> Bool {
+    static func validValue(_ kind: KeyKind, field: String, value: PeerSyncJSONValue) -> Bool {
         switch kind {
         case .space:
             switch field {
@@ -473,108 +473,108 @@ enum PeerSyncValidate {
         }
     }
 
-    static func validOp(key: String, field: String, value: JSONValue, node: String) -> Bool {
+    static func validOp(key: String, field: String, value: PeerSyncJSONValue, node: String) -> Bool {
         guard let kind = keyKind(key) else { return false }
         return isNodeId(node) && validValue(kind, field: field, value: value)
     }
 }
 
-// MARK: - Register
+// MARK: - PeerSyncRegister
 
-struct Register: Equatable {
+struct PeerSyncRegister: Equatable {
     var key: String
     var field: String
-    var value: JSONValue
-    var hlc: Hlc
+    var value: PeerSyncJSONValue
+    var hlc: PeerSyncHlc
     var node: String
 
-    static func from(json v: JSONValue) -> Register? {
+    static func from(json v: PeerSyncJSONValue) -> PeerSyncRegister? {
         guard case .object = v,
               let key = v["key"]?.stringValue,
               let field = v["field"]?.stringValue,
               let value = v["value"],
-              let hlcJ = v["hlc"], let hlc = Hlc.from(json: hlcJ),
+              let hlcJ = v["hlc"], let hlc = PeerSyncHlc.from(json: hlcJ),
               let node = v["node"]?.stringValue
         else { return nil }
-        return Register(key: key, field: field, value: value, hlc: hlc, node: node)
+        return PeerSyncRegister(key: key, field: field, value: value, hlc: hlc, node: node)
     }
 
-    var json: JSONValue {
+    var json: PeerSyncJSONValue {
         .object([("key", .string(key)), ("field", .string(field)), ("value", value), ("hlc", hlc.json), ("node", .string(node))])
     }
 
-    var wire: JSONValue {
+    var wire: PeerSyncJSONValue {
         .object([("key", .string(key)), ("field", .string(field)), ("value", value), ("hlc", hlc.json), ("node", .string(node)), ("t", .string("op"))])
     }
 
     var isValid: Bool { PeerSyncValidate.validOp(key: key, field: field, value: value, node: node) }
 
     /// Negative: self loses; zero: identical; positive: self wins.
-    func lwwCompare(_ o: Register) -> Int {
+    func lwwCompare(_ o: PeerSyncRegister) -> Int {
         if hlc != o.hlc { return hlc < o.hlc ? -1 : 1 }
         let n = utf8Compare(node, o.node)
         if n != 0 { return n }
         return utf8Compare(PeerSyncJSON.canonical(value), PeerSyncJSON.canonical(o.value))
     }
 
-    func same(_ o: Register) -> Bool {
+    func same(_ o: PeerSyncRegister) -> Bool {
         utf8Equal(key, o.key) && utf8Equal(field, o.field) && hlc == o.hlc && utf8Equal(node, o.node)
             && utf8Equal(PeerSyncJSON.canonical(value), PeerSyncJSON.canonical(o.value))
     }
 
-    fileprivate var pair: RegKey { RegKey(key: key, field: field) }
+    fileprivate var pair: PeerSyncRegKey { PeerSyncRegKey(key: key, field: field) }
 }
 
 /// Dictionary key compared by UTF-8 bytes (no Unicode canonical equivalence).
-struct RegKey: Hashable, Comparable {
+struct PeerSyncRegKey: Hashable, Comparable {
     let k: [UInt8]
     let f: [UInt8]
     init(key: String, field: String) { k = Array(key.utf8); f = Array(field.utf8) }
-    static func < (a: RegKey, b: RegKey) -> Bool {
+    static func < (a: PeerSyncRegKey, b: PeerSyncRegKey) -> Bool {
         a.k != b.k ? a.k.lexicographicallyPrecedes(b.k) : a.f.lexicographicallyPrecedes(b.f)
     }
 }
 
-enum Rejection { case invalid, future }
+enum PeerSyncRejection { case invalid, future }
 
-enum Outcome: Equatable {
+enum PeerSyncOutcome: Equatable {
     case stored, duplicate, ignored
-    case rejected(Rejection)
+    case rejected(PeerSyncRejection)
     var isRejected: Bool { if case .rejected = self { return true }; return false }
 }
 
-struct Absorbed {
+struct PeerSyncAbsorbed {
     var accepted: UInt64
     var rejected: UInt64
-    var reply: [Register]
+    var reply: [PeerSyncRegister]
 }
 
-enum BindKind: String { case bound, rebound, minted }
+enum PeerSyncBindKind: String { case bound, rebound, minted }
 
-struct Binding: Equatable {
+struct PeerSyncBinding: Equatable {
     var herdrId: String
     var label: String
-    var kind: BindKind
+    var kind: PeerSyncBindKind
     var space: String?
 }
 
-struct BindPlan: Equatable {
-    var bindings: [Binding]
+struct PeerSyncBindPlan: Equatable {
+    var bindings: [PeerSyncBinding]
     var orphans: [String]
 }
 
-// MARK: - Replica
+// MARK: - PeerSyncReplica
 
-struct Replica {
+struct PeerSyncReplica {
     var node: String
-    var clock: Hlc = .zero
-    private var regs: [RegKey: Register] = [:]
+    var clock: PeerSyncHlc = .zero
+    private var regs: [PeerSyncRegKey: PeerSyncRegister] = [:]
 
     init(node: String) { self.node = node }
 
     private static func spaceKey(_ uuid: String) -> String { PeerSync.spacePrefix + uuid }
 
-    mutating func apply(_ op: Register, now: UInt64) -> Outcome {
+    mutating func apply(_ op: PeerSyncRegister, now: UInt64) -> PeerSyncOutcome {
         if !op.isValid { return .rejected(.invalid) }
         let (limit, o) = now.addingReportingOverflow(PeerSync.maxFutureMs)
         if op.hlc.wall > (o ? UInt64.max : limit) { return .rejected(.future) }
@@ -587,25 +587,25 @@ struct Replica {
     }
 
     @discardableResult
-    mutating func set(key: String, field: String, value: JSONValue, now: UInt64) throws -> Register {
+    mutating func set(key: String, field: String, value: PeerSyncJSONValue, now: UInt64) throws -> PeerSyncRegister {
         guard PeerSyncValidate.validOp(key: key, field: field, value: value, node: node) else {
             throw PeerSyncError.invalid("value not allowed for \(key) \(field)")
         }
         let h = clock.tick(now: now)
-        let op = Register(key: key, field: field, value: value, hlc: h, node: node)
+        let op = PeerSyncRegister(key: key, field: field, value: value, hlc: h, node: node)
         regs[op.pair] = op
         return op
     }
 
-    mutating func insertRaw(_ r: Register) {
+    mutating func insertRaw(_ r: PeerSyncRegister) {
         clock.observe(r.hlc)
         regs[r.pair] = r
     }
 
-    func get(_ key: String, _ field: String) -> Register? { regs[RegKey(key: key, field: field)] }
-    func val(_ key: String, _ field: String) -> JSONValue { get(key, field)?.value ?? .null }
+    func get(_ key: String, _ field: String) -> PeerSyncRegister? { regs[PeerSyncRegKey(key: key, field: field)] }
+    func val(_ key: String, _ field: String) -> PeerSyncJSONValue { get(key, field)?.value ?? .null }
 
-    func sortedRegs() -> [Register] {
+    func sortedRegs() -> [PeerSyncRegister] {
         regs.keys.sorted().compactMap { regs[$0] }
     }
 
@@ -624,13 +624,13 @@ struct Replica {
 
     func allSpaces() -> [String] { spaceUUIDs() }
 
-    func isDeleted(_ uuid: String) -> Bool { val(Replica.spaceKey(uuid), "deleted").boolValue == true }
+    func isDeleted(_ uuid: String) -> Bool { val(PeerSyncReplica.spaceKey(uuid), "deleted").boolValue == true }
 
     func liveSpaces() -> [String] { spaceUUIDs().filter { !isDeleted($0) } }
 
     func lookup(host: String, herdrId: String) -> String? {
         liveSpaces().first {
-            let k = Replica.spaceKey($0)
+            let k = PeerSyncReplica.spaceKey($0)
             return val(k, "host").stringValue.map { utf8Equal($0, host) } == true
                 && val(k, "herdr_id").stringValue.map { utf8Equal($0, herdrId) } == true
         }
@@ -642,7 +642,7 @@ struct Replica {
         }
         var uuid: String
         repeat { uuid = UUID().uuidString.lowercased() } while spaceUUIDs().contains(uuid)
-        let key = Replica.spaceKey(uuid)
+        let key = PeerSyncReplica.spaceKey(uuid)
         try set(key: key, field: "host", value: .string(node), now: now)
         try set(key: key, field: "herdr_id", value: .string(herdrId), now: now)
         try set(key: key, field: "name", value: .string(name), now: now)
@@ -650,14 +650,14 @@ struct Replica {
     }
 
     mutating func deleteSpace(_ uuid: String, now: UInt64) throws {
-        let key = Replica.spaceKey(uuid)
+        let key = PeerSyncReplica.spaceKey(uuid)
         try set(key: key, field: "deleted", value: .bool(true), now: now)
         try set(key: key, field: "notes", value: .null, now: now)
         try set(key: key, field: "pinned_tabs", value: .null, now: now)
     }
 
     mutating func restoreSpace(_ uuid: String, now: UInt64) throws {
-        try set(key: Replica.spaceKey(uuid), field: "deleted", value: .bool(false), now: now)
+        try set(key: PeerSyncReplica.spaceKey(uuid), field: "deleted", value: .bool(false), now: now)
     }
 
     /// Non-null `unitcat:*` categories, by name (sorted by UTF-8 bytes).
@@ -672,16 +672,16 @@ struct Replica {
         return out
     }
 
-    func planBinding(_ workspaces: [(id: String, label: String)]) -> BindPlan {
+    func planBinding(_ workspaces: [(id: String, label: String)]) -> PeerSyncBindPlan {
         let me = node
-        let live = liveSpaces().filter { val(Replica.spaceKey($0), "host").stringValue.map { utf8Equal($0, me) } == true }
+        let live = liveSpaces().filter { val(PeerSyncReplica.spaceKey($0), "host").stringValue.map { utf8Equal($0, me) } == true }
         let ids = Set(workspaces.map { Array($0.id.utf8) })
         var used = Set<String>()
-        var bound: [Int: (BindKind, String)] = [:]
+        var bound: [Int: (PeerSyncBindKind, String)] = [:]
 
         for (i, w) in workspaces.enumerated() {
             if let u = live.first(where: {
-                !used.contains($0) && val(Replica.spaceKey($0), "herdr_id").stringValue.map { utf8Equal($0, w.id) } == true
+                !used.contains($0) && val(PeerSyncReplica.spaceKey($0), "herdr_id").stringValue.map { utf8Equal($0, w.id) } == true
             }) {
                 used.insert(u)
                 bound[i] = (.bound, u)
@@ -689,7 +689,7 @@ struct Replica {
         }
         for (i, w) in workspaces.enumerated() where bound[i] == nil {
             if let u = live.first(where: {
-                let k = Replica.spaceKey($0)
+                let k = PeerSyncReplica.spaceKey($0)
                 let stale: Bool
                 if let h = val(k, "herdr_id").stringValue { stale = !ids.contains(Array(h.utf8)) } else { stale = true }
                 return !used.contains($0) && stale && val(k, "name").stringValue.map { utf8Equal($0, w.label) } == true
@@ -698,21 +698,21 @@ struct Replica {
                 bound[i] = (.rebound, u)
             }
         }
-        let bindings = workspaces.enumerated().map { (i, w) -> Binding in
-            if let (kind, u) = bound[i] { return Binding(herdrId: w.id, label: w.label, kind: kind, space: u) }
-            return Binding(herdrId: w.id, label: w.label, kind: .minted, space: nil)
+        let bindings = workspaces.enumerated().map { (i, w) -> PeerSyncBinding in
+            if let (kind, u) = bound[i] { return PeerSyncBinding(herdrId: w.id, label: w.label, kind: kind, space: u) }
+            return PeerSyncBinding(herdrId: w.id, label: w.label, kind: .minted, space: nil)
         }
-        return BindPlan(bindings: bindings, orphans: live.filter { !used.contains($0) })
+        return PeerSyncBindPlan(bindings: bindings, orphans: live.filter { !used.contains($0) })
     }
 
-    mutating func bindHost(_ workspaces: [(id: String, label: String)], now: UInt64) throws -> BindPlan {
+    mutating func bindHost(_ workspaces: [(id: String, label: String)], now: UInt64) throws -> PeerSyncBindPlan {
         var plan = planBinding(workspaces)
         for i in plan.bindings.indices {
             let b = plan.bindings[i]
             switch b.kind {
             case .bound: break
             case .rebound:
-                try set(key: Replica.spaceKey(b.space ?? ""), field: "herdr_id", value: .string(b.herdrId), now: now)
+                try set(key: PeerSyncReplica.spaceKey(b.space ?? ""), field: "herdr_id", value: .string(b.herdrId), now: now)
             case .minted:
                 plan.bindings[i].space = try mintSpace(herdrId: b.herdrId, name: b.label, now: now)
             }
@@ -720,19 +720,19 @@ struct Replica {
         return plan
     }
 
-    mutating func absorb(_ received: [Register], malformed: UInt64, now: UInt64) -> Absorbed {
+    mutating func absorb(_ received: [PeerSyncRegister], malformed: UInt64, now: UInt64) -> PeerSyncAbsorbed {
         var accepted: UInt64 = 0
         var rejected = malformed
-        var got: [RegKey: Register] = [:]
+        var got: [PeerSyncRegKey: PeerSyncRegister] = [:]
         for op in received {
             got[op.pair] = op
             if apply(op, now: now).isRejected { rejected += 1 } else { accepted += 1 }
         }
-        let reply = regs.keys.sorted().compactMap { k -> Register? in
+        let reply = regs.keys.sorted().compactMap { k -> PeerSyncRegister? in
             guard let r = regs[k] else { return nil }
             if let g = got[k], g.same(r) { return nil }
             return r
         }
-        return Absorbed(accepted: accepted, rejected: rejected, reply: reply)
+        return PeerSyncAbsorbed(accepted: accepted, rejected: rejected, reply: reply)
     }
 }

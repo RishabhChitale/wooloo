@@ -6,13 +6,13 @@ import Foundation
 /// Everything persisted for this machine.
 struct PeerSyncState {
     var node: String
-    var replica: Replica
+    var replica: PeerSyncReplica
     var unitcatSnapshot: [(String, String)] = []
 
     static func fresh() -> PeerSyncState {
         let hex = UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "").prefix(8)
         let node = "mac-\(hex)"
-        return PeerSyncState(node: node, replica: Replica(node: node))
+        return PeerSyncState(node: node, replica: PeerSyncReplica(node: node))
     }
 }
 
@@ -40,7 +40,7 @@ final class PeerSyncStore {
             if !FileManager.default.fileExists(atPath: path.path) { return .fresh() }
             throw PeerSyncError.io("\(error)")
         }
-        let root: JSONValue
+        let root: PeerSyncJSONValue
         do { root = try PeerSyncJSON.parse(String(decoding: data, as: UTF8.self)) } catch {
             throw PeerSyncError.invalid("state file is not valid JSON")
         }
@@ -50,11 +50,11 @@ final class PeerSyncStore {
         guard let node = root["node"]?.stringValue, PeerSyncValidate.isNodeId(node) else {
             throw PeerSyncError.invalid("bad node id in state")
         }
-        var replica = Replica(node: node)
-        if let c = root["clock"], let h = Hlc.from(json: c) { replica.clock = h }
+        var replica = PeerSyncReplica(node: node)
+        if let c = root["clock"], let h = PeerSyncHlc.from(json: c) { replica.clock = h }
         if let items = root["registers"]?.arrayValue {
             for item in items {
-                guard let r = Register.from(json: item), r.isValid else { continue }
+                guard let r = PeerSyncRegister.from(json: item), r.isValid else { continue }
                 if let cur = replica.get(r.key, r.field), r.lwwCompare(cur) <= 0 { continue }
                 replica.insertRaw(r)
             }
@@ -68,8 +68,8 @@ final class PeerSyncStore {
     }
 
     func save(_ s: PeerSyncState) throws {
-        let snap: [(String, JSONValue)] = s.unitcatSnapshot.map { ($0.0, .string($0.1)) }
-        let root: JSONValue = .object([
+        let snap: [(String, PeerSyncJSONValue)] = s.unitcatSnapshot.map { ($0.0, .string($0.1)) }
+        let root: PeerSyncJSONValue = .object([
             ("format", .int(Int64(PeerSync.format))),
             ("node", .string(s.node)),
             ("clock", s.replica.clock.json),
@@ -151,14 +151,14 @@ enum PeerSyncUnitCats {
     }
 
     /// Parsed object members, or nil when the file is missing, unreadable or not an object.
-    static func readFile(_ url: URL) -> [(String, JSONValue)]? {
+    static func readFile(_ url: URL) -> [(String, PeerSyncJSONValue)]? {
         guard let data = try? Data(contentsOf: url),
               let v = try? PeerSyncJSON.parse(String(decoding: data, as: UTF8.self)),
               case .object(let o) = v else { return nil }
         return o
     }
 
-    static func clean(_ members: [(String, JSONValue)]) -> [(String, String)] {
+    static func clean(_ members: [(String, PeerSyncJSONValue)]) -> [(String, String)] {
         var map: [String: String] = [:]
         var order: [String] = []
         for (k, v) in members {
@@ -234,7 +234,7 @@ enum PeerSyncUnitCats {
         let fm = FileManager.default
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: url.deletingLastPathComponent().path, isDirectory: &isDir), isDir.boolValue else { return false }
-        let wanted = clean(s.replica.unitcats().map { ($0.0, JSONValue.string($0.1)) })
+        let wanted = clean(s.replica.unitcats().map { ($0.0, PeerSyncJSONValue.string($0.1)) })
         if fm.fileExists(atPath: url.path) {
             guard let members = readFile(url) else { return false }
             let current = clean(members)
@@ -263,7 +263,7 @@ struct PeerSyncSpaceView {
     var notes: String?
 }
 
-extension Replica {
+extension PeerSyncReplica {
     func spaceView(_ uuid: String) -> PeerSyncSpaceView {
         let k = PeerSync.spacePrefix + uuid
         var order: Double?
@@ -289,28 +289,28 @@ extension Replica {
     }
 
     @discardableResult
-    mutating func setSpaceName(_ uuid: String, _ name: String, now: UInt64) throws -> Register {
+    mutating func setSpaceName(_ uuid: String, _ name: String, now: UInt64) throws -> PeerSyncRegister {
         try set(key: PeerSync.spacePrefix + uuid, field: "name", value: .string(name), now: now)
     }
 
     @discardableResult
-    mutating func setSpaceCategory(_ uuid: String, _ category: String?, now: UInt64) throws -> Register {
+    mutating func setSpaceCategory(_ uuid: String, _ category: String?, now: UInt64) throws -> PeerSyncRegister {
         try set(key: PeerSync.spacePrefix + uuid, field: "category", value: category.map { .string($0) } ?? .null, now: now)
     }
 
     @discardableResult
-    mutating func setSpaceColor(_ uuid: String, _ color: String?, now: UInt64) throws -> Register {
+    mutating func setSpaceColor(_ uuid: String, _ color: String?, now: UInt64) throws -> PeerSyncRegister {
         try set(key: PeerSync.spacePrefix + uuid, field: "color", value: color.map { .string($0) } ?? .null, now: now)
     }
 
     @discardableResult
-    mutating func setSpaceOrder(_ uuid: String, _ order: Double, now: UInt64) throws -> Register {
-        let v: JSONValue = order == order.rounded() && abs(order) < 1e15 ? .int(Int64(order)) : .double(order)
+    mutating func setSpaceOrder(_ uuid: String, _ order: Double, now: UInt64) throws -> PeerSyncRegister {
+        let v: PeerSyncJSONValue = order == order.rounded() && abs(order) < 1e15 ? .int(Int64(order)) : .double(order)
         return try set(key: PeerSync.spacePrefix + uuid, field: "order", value: v, now: now)
     }
 
     @discardableResult
-    mutating func setSpaceNotes(_ uuid: String, _ notes: String?, now: UInt64) throws -> Register {
+    mutating func setSpaceNotes(_ uuid: String, _ notes: String?, now: UInt64) throws -> PeerSyncRegister {
         try set(key: PeerSync.spacePrefix + uuid, field: "notes", value: notes.map { .string($0) } ?? .null, now: now)
     }
 }
