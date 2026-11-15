@@ -385,10 +385,14 @@ enum PeerPairing {
     }
 
     /// The forced command installed at `~/.local/share/wooloo/peer-bridge`. It never runs request
-    /// text: it matches `SSH_ORIGINAL_COMMAND` against fixed forms and execs Herdr itself.
-    static let dispatcherBody = #"""
+    /// text: it compares `SSH_ORIGINAL_COMMAND` (or the stdin script of `/bin/sh -s`) with the
+    /// `PeerAllowList` templates, byte for byte, and then runs fixed code for the matching entry.
+    static var dispatcherBody: String { dispatcherHead + PeerAllowList.shellMatching() + dispatcherTail }
+
+    private static let dispatcherHead = #"""
         set -u
         umask 077
+        LC_ALL=C; export LC_ALL
         peer_fail() { printf 'wooloo-peer-bridge: %s\n' "$1" >&2; exit 64; }
         [ $# -eq 2 ] && [ "$1" = --peer ] || peer_fail 'misconfigured forced command'
         peer_name=$2
@@ -397,64 +401,177 @@ enum PeerPairing {
         [ -x "$peer_herdr" ] || peer_fail 'Herdr is not installed at the paired path; pair this device again'
         peer_request=${SSH_ORIGINAL_COMMAND-}
         [ ${#peer_request} -le 16384 ] || peer_fail 'request too long'
-        peer_session=
+        peer_subject=$peer_request
+        peer_stdin=
+        if [ "$peer_request" = '/bin/sh -s' ]; then
+            # sshd closes stdin after the client wrote the script, so reading to EOF ends.
+            peer_stdin=1
+            peer_subject=$(head -c 16385; printf x)
+            peer_subject=${peer_subject%x}
+            [ ${#peer_subject} -le 16384 ] || peer_fail 'request too long'
+        fi
+        # Slot values are cut out of the request only to rebuild the expected text; the request is
+        # then compared with that text, so anything unexpected simply fails to match.
+        peer_s=; peer_v=; peer_sa=; peer_t=
+        case $peer_subject in
+            'wooloo-peer '*' '*) peer_t=${peer_subject#wooloo-peer * }; peer_s=${peer_t%%[!A-Za-z0-9_-]*};;
+            *--session\ *) peer_t=${peer_subject#*--session }; peer_s=${peer_t%%[!A-Za-z0-9_-]*};;
+        esac
+        [ ${#peer_s} -le 64 ] || peer_s=
+        case $peer_subject in
+            *version=*) peer_t=${peer_subject#*version=}; peer_v=${peer_t%%[!0-9A-Za-z.+-]*};;
+        esac
+        [ ${#peer_v} -le 32 ] || peer_v=
+        if [ -n "$peer_s" ] && [ "$peer_s" != default ]; then peer_sa="--session $peer_s "; fi
+        peer_entry=
         peer_verb=
         peer_flag=
         peer_null=
-        peer_marker=
-        # The request is only matched against fixed forms; none of its text is ever run.
-        case $peer_request in
-            'wooloo-peer hello')
-                printf 'wooloo-peer-bridge-v1 %s\n' "$peer_version"; exit 0;;
-            'wooloo-peer '*)
-                case $peer_request in *[!A-Za-z0-9_\ -]*) peer_fail 'unsupported request';; esac
-                set -f; set -- $peer_request; set +f
-                [ $# -eq 3 ] || peer_fail 'unsupported request'
-                case $2 in
-                    api) peer_verb=remote-api-bridge;;
-                    client) peer_verb=remote-client-bridge;;
-                    check) peer_verb=remote-api-bridge; peer_flag=--check;;
-                    *) peer_fail 'unsupported request';;
-                esac
-                peer_session=$3;;
-            *)
-                # Herdr and wooloo send a shell script whose bridge line is `exec <herdr> [--session S] <verb>`.
-                peer_lines=$(printf '%s\n' "$peer_request" | LC_ALL=C sed -n -E \
-                    "s/^[[:space:]]*exec[[:space:]]+[^[:space:]]+([[:space:]]+--session[[:space:]]+([^[:space:]]+))?[[:space:]]+(remote-api-bridge|remote-client-bridge)([[:space:]]+(--idle-timeout-v1|--check))?([[:space:]]*(<)[[:space:]]*\/dev\/null)?[[:space:]]*'?[[:space:]]*\$/S=\2 V=\3 F=\5 N=\7/p") \
-                    || peer_fail 'unsupported request'
-                case $peer_lines in
-                    ''|*"
-        "*) peer_fail 'unsupported request; this key may only open Herdr bridges';;
-                esac
-                peer_token=${peer_lines#S=}; peer_token=${peer_token%% V=*}
-                peer_session=$(printf '%s' "$peer_token" | LC_ALL=C tr -d "'\\\\\"")
-                peer_verb=${peer_lines#* V=}; peer_verb=${peer_verb%% F=*}
-                peer_flag=${peer_lines#* F=}; peer_flag=${peer_flag%% N=*}
-                peer_null=${peer_lines##* N=}
-                case $peer_request in *herdr-remote-output-ready:1*) peer_marker=1;; esac;;
+        peer_framed=
+        peer_marker() { printf '\n%s\n' 'herdr-remote-output-ready:1'; }
+
+        """#
+
+    private static let dispatcherTail = #"""
+        [ -n "$peer_entry" ] || peer_fail 'unsupported request'
+        [ -z "$peer_framed" ] || peer_marker
+        peer_check() { peer_cap=$("$peer_herdr" --session "$peer_s" remote-api-bridge --check </dev/null 2>/dev/null) && [ "$peer_cap" = herdr-api-bridge-v1 ]; }
+        case $peer_entry in
+            wooloo-hello) printf 'wooloo-peer-bridge-v1 %s\n' "$peer_version"; exit 0;;
+            wooloo-api|herdr-api-bridge) peer_verb=remote-api-bridge;;
+            wooloo-client|herdr-client-bridge) peer_verb=remote-client-bridge;;
+            wooloo-check|herdr-api-check) peer_verb=remote-api-bridge; peer_flag=--check;;
+            herdr-client-bridge-idle) peer_verb=remote-client-bridge; peer_flag=--idle-timeout-v1;;
+            sh-saved-bridge) peer_verb=remote-client-bridge; peer_null=1;;
+            herdr-cached-api)
+                if peer_check; then peer_marker; peer_verb=remote-api-bridge
+                else printf '%s\n' 'herdr-machine-metadata-stale-v1' >&2; exit 78; fi;;
+            herdr-api-discovery)
+                if peer_check; then printf '%s\n' "$peer_herdr"; exit 0; fi
+                printf '%s\n' 'remote Herdr does not support machine API forwarding; update Herdr on this machine' >&2
+                exit 2;;
+            herdr-path-probe|sh-path-probe|sh-candidates) printf '%s\n' "$peer_herdr"; exit 0;;
+            sh-exists) exit 0;;
+            sh-uname) uname -s; uname -m; exit 0;;
+            sh-client-status) exec "$peer_herdr" status client --json;;
+            sh-session-list) exec "$peer_herdr" session list --json;;
+            sh-server-status) if [ -n "$peer_sa" ]; then exec "$peer_herdr" --session "$peer_s" status server --json; fi
+                exec "$peer_herdr" status server --json;;
+            wooloo-sync)
+                # Metadata sync responder (docs/sync-protocol.md): no arguments, runs nothing from the
+                # request. Input is capped before wooloo-sync sees it: the stream by head, then each
+                # line and the total by awk; over a cap awk stops, wooloo-sync sees EOF and commits nothing.
+                peer_sync=$HOME/.local/bin/wooloo-sync
+                [ -x "$peer_sync" ] || peer_sync=$(command -v wooloo-sync 2>/dev/null) || peer_sync=
+                { [ -n "$peer_sync" ] && [ -x "$peer_sync" ]; } || peer_fail 'wooloo-sync not found'
+                head -c 33554433 | awk -v line_max=1048576 -v total_max=33554432 '
+                    { total += length($0) + 1
+                      if (length($0) > line_max || total > total_max) {
+                          print "wooloo-peer-bridge: sync input over the size limit" > "/dev/stderr"; exit 65 }
+                      print }' | "$peer_sync" exchange
+                exit $?;;
+            *) peer_fail 'unsupported request';;
         esac
-        case $peer_verb in remote-api-bridge|remote-client-bridge) ;; *) peer_fail 'unsupported request';; esac
-        case $peer_flag in ''|--idle-timeout-v1|--check) ;; *) peer_fail 'unsupported request';; esac
-        if [ -n "$peer_session" ]; then
-            case $peer_session in *[!A-Za-z0-9_-]*) peer_fail 'invalid session name';; esac
-            [ ${#peer_session} -le 64 ] || peer_fail 'invalid session name'
-        fi
+        # Herdr bridges. Requests with {session} always pass it; {sessionArgs} ones only when set.
+        case $peer_entry in
+            wooloo-*|herdr-api-*|herdr-cached-api) ;;
+            *) [ -n "$peer_sa" ] || peer_s=;;
+        esac
         if [ -z "$peer_flag" ] || [ "$peer_flag" = --idle-timeout-v1 ]; then
             # Presence for wooloo's badge: this process keeps its pid through exec.
             peer_state="$HOME/.local/state/wooloo/peer-presence"
             if mkdir -p "$peer_state" 2>/dev/null && [ ! -L "$peer_state" ]; then
-                printf 'peer=%s\nsession=%s\nverb=%s\nstarted=%s\n' "$peer_name" "${peer_session:-default}" \
+                printf 'peer=%s\nsession=%s\nverb=%s\nstarted=%s\n' "$peer_name" "${peer_s:-default}" \
                     "$peer_verb" "$(date +%s)" > "$peer_state/.$peer_name.$$" 2>/dev/null \
                     && mv -f "$peer_state/.$peer_name.$$" "$peer_state/$peer_name.$$" 2>/dev/null
             fi
         fi
-        [ -z "$peer_marker" ] || printf '\n%s\n' 'herdr-remote-output-ready:1'
         set -- "$peer_verb"
         [ -z "$peer_flag" ] || set -- "$@" "$peer_flag"
-        [ -z "$peer_session" ] || set -- --session "$peer_session" "$@"
+        [ -z "$peer_s" ] || set -- --session "$peer_s" "$@"
         if [ -n "$peer_null" ]; then exec "$peer_herdr" "$@" </dev/null; fi
         exec "$peer_herdr" "$@"
         """#
+}
+
+/// The peer allow-list: every request must equal one template exactly (docs/peer-allowlist.json,
+/// generated by gen/allowlist.py; a test keeps this table identical to it). `dispatcherBody` is
+/// generated from this table, so the shell script and the table cannot drift apart.
+enum PeerAllowList {
+    enum Transport: String, Sendable { case argv, stdin }
+    struct Entry: Equatable, Sendable {
+        let name: String
+        let transport: Transport
+        let template: String
+    }
+
+    static let marker = "herdr-remote-output-ready:1"
+    static let markerPrefix = "printf '\n%s\n' 'herdr-remote-output-ready:1'\n"
+    /// Largest line / whole stream the sync responder lets through to `wooloo-sync exchange`.
+    static let syncLineLimit = 1_048_576
+    static let syncStreamLimit = 33_554_432
+    static let requestLimit = 16384
+
+    static let entries: [Entry] = [
+        Entry(name: "wooloo-hello", transport: .argv, template: "wooloo-peer hello"),
+        Entry(name: "wooloo-api", transport: .argv, template: "wooloo-peer api {session}"),
+        Entry(name: "wooloo-client", transport: .argv, template: "wooloo-peer client {session}"),
+        Entry(name: "wooloo-check", transport: .argv, template: "wooloo-peer check {session}"),
+        Entry(name: "wooloo-sync", transport: .argv, template: "wooloo-peer sync"),
+        Entry(name: "herdr-path-probe", transport: .argv, template: "printf '\n%s\n' 'herdr-remote-output-ready:1'\ncommand -v herdr"),
+        Entry(name: "herdr-client-bridge", transport: .argv, template: "printf '\n%s\n' 'herdr-remote-output-ready:1'\nexec {herdr} {sessionArgs}remote-client-bridge"),
+        Entry(name: "herdr-client-bridge-idle", transport: .argv, template: "printf '\n%s\n' 'herdr-remote-output-ready:1'\nexec {herdr} {sessionArgs}remote-client-bridge --idle-timeout-v1"),
+        Entry(name: "herdr-api-bridge", transport: .argv, template: "printf '\n%s\n' 'herdr-remote-output-ready:1'\nexec {herdr} --session {session} remote-api-bridge"),
+        Entry(name: "herdr-api-check", transport: .argv, template: "printf '\n%s\n' 'herdr-remote-output-ready:1'\nexec {herdr} --session {session} remote-api-bridge --check"),
+        Entry(name: "herdr-api-discovery", transport: .argv, template: "/bin/sh -c 'printf '\\''\n%s\n'\\'' '\\''herdr-remote-output-ready:1'\\''\nset -f\ncandidates=$(\ncommand -v herdr\nhome=${HOME:-}\nuser=${USER:-}\nversion={version}\nemit() {\n    path=$1\n    if [ -n \"$path\" ] && [ -x \"$path\" ]; then\n        printf '\\''%s\\n'\\'' \"$path\"\n    fi\n}\nif [ -n \"$home\" ]; then\n    emit \"$home/.local/bin/herdr\"\nfi\n    emit \"/opt/homebrew/bin/herdr\"\n    emit \"/usr/local/bin/herdr\"\nif [ -n \"$home\" ]; then\n    emit \"$home/.local/share/mise/installs/herdr/$version/bin/herdr\"\n    emit \"$home/.local/share/mise/installs/herdr/$version/herdr\"\n    emit \"$home/.local/share/mise/installs/github-ogulcancelik-herdr/$version/herdr\"\n    emit \"$home/.nix-profile/bin/herdr\"\nfi\nif [ -n \"$user\" ]; then\n    emit \"/etc/profiles/per-user/$user/bin/herdr\"\nfi\nemit \"/nix/var/nix/profiles/default/bin/herdr\"\nemit \"/run/current-system/sw/bin/herdr\"\n\n)\nIFS='\\''\n'\\''\nfor candidate in $candidates; do\n    case \"$candidate\" in\n        */mise/shims/herdr) continue ;;\n        /*) ;;\n        *) continue ;;\n    esac\n    [ -x \"$candidate\" ] || continue\n    if capability=$(\"$candidate\" --session {session} remote-api-bridge --check </dev/null 2>/dev/null) && [ \"$capability\" = herdr-api-bridge-v1 ]; then\n        printf '\\''%s\\n'\\'' \"$candidate\"\n        exit 0\n    fi\ndone\nprintf '\\''%s\\n'\\'' '\\''remote Herdr does not support machine API forwarding; update Herdr on this machine'\\'' >&2\nexit 2'"),
+        Entry(name: "herdr-cached-api", transport: .argv, template: "/bin/sh -c 'if capability=$({herdr} --session {session} remote-api-bridge --check </dev/null 2>/dev/null) && [ \"$capability\" = herdr-api-bridge-v1 ]; then\nprintf '\\''\n%s\n'\\'' '\\''herdr-remote-output-ready:1'\\''\nexec {herdr} --session {session} remote-api-bridge\nelse\n    printf '\\''%s\\n'\\'' '\\''herdr-machine-metadata-stale-v1'\\'' >&2\n    exit 78\nfi'"),
+        Entry(name: "sh-uname", transport: .stdin, template: "uname -s\nuname -m\n"),
+        Entry(name: "sh-path-probe", transport: .stdin, template: "command -v herdr\n"),
+        Entry(name: "sh-candidates", transport: .stdin, template: "home=${HOME:-}\nuser=${USER:-}\nversion={version}\nemit() {\n    path=$1\n    if [ -n \"$path\" ] && [ -x \"$path\" ]; then\n        printf '%s\\n' \"$path\"\n    fi\n}\nif [ -n \"$home\" ]; then\n    emit \"$home/.local/bin/herdr\"\nfi\n    emit \"/opt/homebrew/bin/herdr\"\n    emit \"/usr/local/bin/herdr\"\nif [ -n \"$home\" ]; then\n    emit \"$home/.local/share/mise/installs/herdr/$version/bin/herdr\"\n    emit \"$home/.local/share/mise/installs/herdr/$version/herdr\"\n    emit \"$home/.local/share/mise/installs/github-ogulcancelik-herdr/$version/herdr\"\n    emit \"$home/.nix-profile/bin/herdr\"\nfi\nif [ -n \"$user\" ]; then\n    emit \"/etc/profiles/per-user/$user/bin/herdr\"\nfi\nemit \"/nix/var/nix/profiles/default/bin/herdr\"\nemit \"/run/current-system/sw/bin/herdr\"\n"),
+        Entry(name: "sh-exists", transport: .stdin, template: "test -x {herdr}"),
+        Entry(name: "sh-client-status", transport: .stdin, template: "test -x {herdr} && {herdr} status client --json"),
+        Entry(name: "sh-server-status", transport: .stdin, template: "{herdr} {sessionArgs}status server --json"),
+        Entry(name: "sh-session-list", transport: .stdin, template: "{herdr} session list --json"),
+        Entry(name: "sh-saved-bridge", transport: .stdin, template: "exec {herdr} {sessionArgs}remote-client-bridge </dev/null"),
+    ]
+
+    /// The matching section of the dispatcher: sets `peer_entry` (and `peer_framed`) when the
+    /// request equals one template. Entries with `{session}` or `{version}` need a nonempty value.
+    static func shellMatching() -> String {
+        var lines: [String] = []
+        for entry in entries {
+            let stdin = entry.transport == .stdin
+            var guards = [stdin ? #"[ -n "$peer_stdin" ]"# : #"[ -z "$peer_stdin" ]"#]
+            if entry.template.contains("{session}") { guards.append(#"[ -n "$peer_s" ]"#) }
+            if entry.template.contains("{version}") { guards.append(#"[ -n "$peer_v" ]"#) }
+            let framed = stdin || entry.template.hasPrefix(markerPrefix) || entry.name == "herdr-api-discovery"
+            lines.append(#"if [ -z "$peer_entry" ] && "# + guards.joined(separator: " && ")
+                + #" && [ "$peer_subject" = "# + shellExpression(entry.template, stdin: stdin)
+                + " ]; then peer_entry=" + entry.name + (framed ? "; peer_framed=1" : "") + "; fi")
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// Shell for `case`-free exact matching: the template as single-quoted pieces with the trusted
+    /// slot values spliced in. The request text itself is only ever compared, never expanded.
+    static func shellExpression(_ template: String, stdin: Bool) -> String {
+        var text = template
+        if stdin { text = markerPrefix + text }
+        var pieces: [String] = []
+        var literal = ""
+        func flush() { if !literal.isEmpty { pieces.append("'" + literal.replacingOccurrences(of: "'", with: "'\\''") + "'"); literal = "" } }
+        var rest = Substring(text)
+        let slots: [(String, String)] = [("{herdr}", #""$peer_herdr""#), ("{sessionArgs}", #""$peer_sa""#),
+                                         ("{session}", #""$peer_s""#), ("{version}", #""$peer_v""#)]
+        outer: while !rest.isEmpty {
+            for (name, value) in slots where rest.hasPrefix(name) {
+                flush(); pieces.append(value); rest = rest.dropFirst(name.count); continue outer
+            }
+            literal.append(rest.removeFirst())
+        }
+        flush()
+        return pieces.joined()
+    }
 }
 
 /// Which paired peers have a bridge open on which local session, from the dispatcher's files.

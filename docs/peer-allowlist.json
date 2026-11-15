@@ -1,6 +1,7 @@
 {
   "format": "wooloo-peer-allowlist-v1",
-  "provisional": true,
+  "provisional": false,
+  "revision": 2,
   "herdrVersion": "0.9.5",
   "source": "herdrdev/herdr 2ecf19a src/remote/attach.rs, src/remote/saved.rs",
   "matching": "Every request must equal one template exactly, byte for byte, after the slots are filled. No globbing, no trimming, no shell evaluation of the request. Anything else is refused with exit 64 and 'wooloo-peer-bridge: <reason>' on stderr.",
@@ -54,6 +55,13 @@
       "slots": [
         "session"
       ]
+    },
+    {
+      "name": "wooloo-sync",
+      "transport": "argv",
+      "template": "wooloo-peer sync",
+      "response": "exec wooloo-sync exchange (stdin/stdout passthrough); the responder takes no arguments, executes nothing, and touches only its own sync state file",
+      "notes": "Metadata sync (docs/sync-protocol.md). Added in revision 2; the Mac copy must mirror this entry and the revision."
     },
     {
       "name": "herdr-path-probe",

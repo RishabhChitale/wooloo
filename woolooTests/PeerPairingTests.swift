@@ -50,7 +50,9 @@ final class PeerPairingTests: XCTestCase {
         let bin = directory.appendingPathComponent("bin", isDirectory: true)
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let herdr = bin.appendingPathComponent("herdr")
-        let script = "#!/bin/sh\nif [ \"$1\" = --version ]; then echo \"herdr 0.9.5\"; else printf 'ARGS:%s\\n' \"$*\"; fi\n"
+        let script = "#!/bin/sh\nif [ \"$1\" = --version ]; then echo \"herdr 0.9.5\"; "
+            + "elif [ -e \"$HOME/herdr-capable\" ] && [ \"${*##* }\" = --check ]; then echo herdr-api-bridge-v1; "
+            + "else printf 'ARGS:%s\\n' \"$*\"; fi\n"
         try Data(script.utf8).write(to: herdr)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: herdr.path)
         return herdr.path
@@ -63,18 +65,27 @@ final class PeerPairingTests: XCTestCase {
         let pid: Int32
     }
 
-    private func runProcess(_ executable: String, _ arguments: [String], environment: [String: String] = [:]) throws -> Run {
+    private func runProcess(_ executable: String, _ arguments: [String], environment: [String: String] = [:], input: Data? = nil) throws -> Run {
+        signal(SIGPIPE, SIG_IGN)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.environment = environment
-        process.standardInput = FileHandle.nullDevice
+        let stdin = Pipe()
+        process.standardInput = input == nil ? FileHandle.nullDevice : stdin
         let out = Pipe()
         let err = Pipe()
         process.standardOutput = out
         process.standardError = err
         try process.run()
         let pid = process.processIdentifier
+        if let input {
+            // Written from another thread: the dispatcher may stop reading early (over a cap).
+            DispatchQueue.global().async {
+                try? stdin.fileHandleForWriting.write(contentsOf: input)
+                try? stdin.fileHandleForWriting.close()
+            }
+        }
         let stdout = out.fileHandleForReading.readDataToEndOfFile()
         let stderr = err.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
@@ -83,14 +94,14 @@ final class PeerPairingTests: XCTestCase {
     }
 
     /// Installs the dispatcher for the fake Herdr and runs it the way sshd does.
-    private func runDispatcher(_ request: String?, arguments: [String] = ["--peer", "p"]) throws -> Run {
+    private func runDispatcher(_ request: String?, arguments: [String] = ["--peer", "p"], input: Data? = nil) throws -> Run {
         let dispatcher = PeerPairing.dispatcherURL(home: directory)
         if !FileManager.default.fileExists(atPath: dispatcher.path) {
             try PeerPairing.installDispatcher(home: directory, herdr: try makeFakeHerdr(), version: "0.9.5")
         }
         var environment = ["HOME": directory.path, "PATH": "/usr/bin:/bin"]
         environment["SSH_ORIGINAL_COMMAND"] = request
-        return try runProcess("/bin/sh", [dispatcher.path] + arguments, environment: environment)
+        return try runProcess("/bin/sh", [dispatcher.path] + arguments, environment: environment, input: input)
     }
 
     private var presence: URL { PeerPairing.presenceDirectory(home: directory) }
@@ -324,44 +335,140 @@ final class PeerPairingTests: XCTestCase {
 
     // MARK: Dispatcher
 
-    func testDispatcherRunsOnlyFixedBridgeForms() throws {
-        let cases: [(String, String)] = [
-            ("wooloo-peer hello", "wooloo-peer-bridge-v1 0.9.5\n"),
-            ("wooloo-peer api work", "ARGS:--session work remote-api-bridge\n"),
-            ("wooloo-peer client work", "ARGS:--session work remote-client-bridge\n"),
-            ("wooloo-peer check work", "ARGS:--session work remote-api-bridge --check\n"),
-            ("printf herdr-remote-output-ready:1\nexec /opt/herdr --session work remote-client-bridge",
-             "\nherdr-remote-output-ready:1\nARGS:--session work remote-client-bridge\n"),
-            ("exec '/opt/herdr' --session 'work' remote-api-bridge --idle-timeout-v1 </dev/null'",
-             "ARGS:--session work remote-api-bridge --idle-timeout-v1\n"),
-            ("exec /opt/herdr remote-api-bridge", "ARGS:remote-api-bridge\n"),
-        ]
-        for (request, output) in cases {
-            let run = try runDispatcher(request)
-            XCTAssertEqual(run.status, 0, request + " " + run.stderr)
-            XCTAssertEqual(run.stdout, output, request)
-            XCTAssertEqual(run.stderr, "", request)
+    private var fakeHerdrPath: String { directory.appendingPathComponent("bin/herdr").path }
+    private let ready = "\nherdr-remote-output-ready:1\n"
+
+    /// A template with its slots filled the way a client does: session `work`, this Herdr, version 0.9.5.
+    private func filled(_ template: String, session: String = "work") -> String {
+        template.replacingOccurrences(of: "{herdr}", with: fakeHerdrPath)
+            .replacingOccurrences(of: "{sessionArgs}", with: session == "default" ? "" : "--session \(session) ")
+            .replacingOccurrences(of: "{session}", with: session)
+            .replacingOccurrences(of: "{version}", with: "0.9.5")
+    }
+
+    /// Sends a filled entry the way its transport does: SSH_ORIGINAL_COMMAND, or `/bin/sh -s` plus a stdin script.
+    private func send(_ entry: PeerAllowList.Entry, session: String = "work") throws -> Run {
+        let text = filled(entry.template, session: session)
+        switch entry.transport {
+        case .argv: return try runDispatcher(text)
+        case .stdin: return try runDispatcher("/bin/sh -s", input: Data((PeerAllowList.markerPrefix + text).utf8))
         }
+    }
+
+    private func installFakeSync() throws {
+        let bin = directory.appendingPathComponent(".local/bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let sync = bin.appendingPathComponent("wooloo-sync")
+        try Data("#!/bin/sh\necho \"sync-args:$*\"\ncat\n".utf8).write(to: sync)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sync.path)
+    }
+
+    func testDispatcherAllowsEveryTemplateExactlyOnce() throws {
+        try makeFakeHerdr()
+        FileManager.default.createFile(atPath: directory.appendingPathComponent("herdr-capable").path, contents: Data())
+        let herdr = fakeHerdrPath
+        let uname = try runProcess("/usr/bin/uname", ["-s"]).stdout + (try runProcess("/usr/bin/uname", ["-m"]).stdout)
+        let expected: [String: String] = [
+            "wooloo-hello": "wooloo-peer-bridge-v1 0.9.5\n",
+            "wooloo-api": "ARGS:--session work remote-api-bridge\n",
+            "wooloo-client": "ARGS:--session work remote-client-bridge\n",
+            "wooloo-check": "herdr-api-bridge-v1\n",
+            "wooloo-sync": "",
+            "herdr-path-probe": ready + herdr + "\n",
+            "herdr-client-bridge": ready + "ARGS:--session work remote-client-bridge\n",
+            "herdr-client-bridge-idle": ready + "ARGS:--session work remote-client-bridge --idle-timeout-v1\n",
+            "herdr-api-bridge": ready + "ARGS:--session work remote-api-bridge\n",
+            "herdr-api-check": ready + "herdr-api-bridge-v1\n",
+            "herdr-api-discovery": ready + herdr + "\n",
+            "herdr-cached-api": ready + "ARGS:--session work remote-api-bridge\n",
+            "sh-uname": ready + uname,
+            "sh-path-probe": ready + herdr + "\n",
+            "sh-candidates": ready + herdr + "\n",
+            "sh-exists": ready,
+            "sh-client-status": ready + "ARGS:status client --json\n",
+            "sh-server-status": ready + "ARGS:--session work status server --json\n",
+            "sh-session-list": ready + "ARGS:session list --json\n",
+            "sh-saved-bridge": ready + "ARGS:--session work remote-client-bridge\n",
+        ]
+        XCTAssertEqual(Set(expected.keys), Set(PeerAllowList.entries.map(\.name)))
+        for entry in PeerAllowList.entries where entry.name != "wooloo-sync" {
+            let run = try send(entry)
+            XCTAssertEqual(run.status, 0, entry.name + " " + run.stderr)
+            XCTAssertEqual(run.stdout, expected[entry.name], entry.name)
+            XCTAssertEqual(run.stderr, "", entry.name)
+        }
+        try installFakeSync()
+        let sync = try runDispatcher("wooloo-peer sync", input: Data("{\"a\":1}\n".utf8))
+        XCTAssertEqual(sync.status, 0, sync.stderr)
+        XCTAssertEqual(sync.stdout, "sync-args:exchange\n{\"a\":1}\n")
+        XCTAssertEqual(sync.stderr, "")
+    }
+
+    func testDispatcherSessionDefaultAndSessionArgs() throws {
+        try makeFakeHerdr()
+        let status = try XCTUnwrap(PeerAllowList.entries.first { $0.name == "sh-server-status" })
+        let plain = try send(status, session: "default")
+        XCTAssertEqual(plain.stdout, ready + "ARGS:status server --json\n", plain.stderr)
+        // `--session default ` is not what a client sends for the default session.
+        let explicit = try runDispatcher("/bin/sh -s", input: Data((PeerAllowList.markerPrefix + "\(fakeHerdrPath) --session default status server --json").utf8))
+        XCTAssertEqual(explicit.status, 64)
+        XCTAssertEqual(explicit.stderr, "wooloo-peer-bridge: unsupported request\n")
+        let bridge = try send(try XCTUnwrap(PeerAllowList.entries.first { $0.name == "herdr-client-bridge" }), session: "default")
+        XCTAssertEqual(bridge.stdout, ready + "ARGS:remote-client-bridge\n", bridge.stderr)
+    }
+
+    func testDispatcherCachedApiAndDiscoveryRefuseIncapableHerdr() throws {
+        try makeFakeHerdr()
+        let cached = try send(try XCTUnwrap(PeerAllowList.entries.first { $0.name == "herdr-cached-api" }))
+        XCTAssertEqual(cached.status, 78)
+        XCTAssertEqual(cached.stdout, "")
+        XCTAssertEqual(cached.stderr, "herdr-machine-metadata-stale-v1\n")
+        let discovery = try send(try XCTUnwrap(PeerAllowList.entries.first { $0.name == "herdr-api-discovery" }))
+        XCTAssertEqual(discovery.status, 2)
+        XCTAssertEqual(discovery.stderr, "remote Herdr does not support machine API forwarding; update Herdr on this machine\n")
     }
 
     func testDispatcherRefusesEverythingElse() throws {
         let marker = directory.appendingPathComponent("ran")
+        let touch = "touch \(marker.path)"
+        try makeFakeHerdr()
+        let herdr = fakeHerdrPath
+        let bridge = "printf '\n%s\n' 'herdr-remote-output-ready:1'\nexec \(herdr) "
         let refused: [(String?, String)] = [
-            ("wooloo-peer api S; touch \(marker.path)", "unsupported request"),
+            ("wooloo-peer api S; \(touch)", "unsupported request"),
+            ("wooloo-peer api S && \(touch)", "unsupported request"),
             ("wooloo-peer api bad.session", "unsupported request"),
+            ("wooloo-peer api work ", "unsupported request"),
+            ("wooloo-peer api work\n", "unsupported request"),
             ("wooloo-peer api", "unsupported request"),
+            ("wooloo-peer api $(\(touch))", "unsupported request"),
+            ("wooloo-peer api `\(touch)`", "unsupported request"),
+            ("wooloo-peer api *", "unsupported request"),
             ("wooloo-peer shell work", "unsupported request"),
-            ("exec /x remote-api-bridge; touch \(marker.path)", "unsupported request; this key may only open Herdr bridges"),
-            ("exec /x remote-api-bridge\nexec /x remote-client-bridge", "unsupported request; this key may only open Herdr bridges"),
-            ("/bin/sh -s", "unsupported request; this key may only open Herdr bridges"),
-            ("touch \(marker.path)", "unsupported request; this key may only open Herdr bridges"),
-            ("", "unsupported request; this key may only open Herdr bridges"),
-            (nil, "unsupported request; this key may only open Herdr bridges"),
-            // A space inside the session token stops the bridge line from matching at all.
-            ("exec /x --session $(touch \(marker.path)) remote-api-bridge", "unsupported request; this key may only open Herdr bridges"),
-            ("exec /x --session $(id) remote-api-bridge", "invalid session name"),
-            ("exec /x --session `id` remote-api-bridge", "invalid session name"),
-            ("exec /x --session \(String(repeating: "s", count: 65)) remote-api-bridge", "invalid session name"),
+            ("wooloo-peer hello; \(touch)", "unsupported request"),
+            ("wooloo-peer hello extra", "unsupported request"),
+            ("wooloo-peer sync; \(touch)", "unsupported request"),
+            ("wooloo-peer sync extra", "unsupported request"),
+            ("wooloo-peer  sync", "unsupported request"),
+            ("WOOLOO-PEER hello", "unsupported request"),
+            (bridge + "remote-client-bridge; \(touch)", "unsupported request"),
+            (bridge + "remote-client-bridge\n\(touch)", "unsupported request"),
+            (bridge + "--session $(id) remote-client-bridge", "unsupported request"),
+            (bridge + "--session `id` remote-client-bridge", "unsupported request"),
+            (bridge + "--session default remote-client-bridge", "unsupported request"),
+            (bridge + "--session work remote-client-bridge --idle-timeout-v1 --x", "unsupported request"),
+            (bridge.replacingOccurrences(of: herdr, with: "/opt/herdr") + "remote-client-bridge", "unsupported request"),
+            (bridge.replacingOccurrences(of: herdr, with: "'\(herdr)'") + "remote-client-bridge", "unsupported request"),
+            (bridge.replacingOccurrences(of: herdr, with: "\(herdr)/../herdr") + "remote-client-bridge", "unsupported request"),
+            ("exec \(herdr) remote-client-bridge", "unsupported request"),
+            ("exec \(herdr) install", "unsupported request"),
+            ("/bin/sh -s ", "unsupported request"),
+            ("/bin/sh -s; \(touch)", "unsupported request"),
+            ("/bin/sh -c '\(touch)'", "unsupported request"),
+            ("/bin/sh -s", "unsupported request"),
+            ("touch \(marker.path)", "unsupported request"),
+            ("", "unsupported request"),
+            (nil, "unsupported request"),
             (String(repeating: "x", count: 16385), "request too long"),
         ]
         for (request, reason) in refused {
@@ -369,6 +476,29 @@ final class PeerPairingTests: XCTestCase {
             XCTAssertEqual(run.status, 64, request ?? "nil")
             XCTAssertEqual(run.stdout, "", request ?? "nil")
             XCTAssertEqual(run.stderr, "wooloo-peer-bridge: \(reason)\n", request ?? "nil")
+        }
+
+        // `/bin/sh -s` only runs the known scripts: anything else on stdin is refused, with no output.
+        let scripts: [(String, String)] = [
+            ("uname -s\nuname -m\n", "unsupported request"),                      // no marker prefix
+            (PeerAllowList.markerPrefix + "uname -s\nuname -m\n; \(touch)\n", "unsupported request"),
+            (PeerAllowList.markerPrefix + "uname -s\nuname -m\n\(touch)\n", "unsupported request"),
+            (PeerAllowList.markerPrefix + "command -v herdr\n\n", "unsupported request"),
+            (PeerAllowList.markerPrefix + "test -x \(herdr) && \(touch)", "unsupported request"),
+            (PeerAllowList.markerPrefix + "test -x /bin/sh", "unsupported request"),
+            (PeerAllowList.markerPrefix + "\(herdr) --session $(\(touch)) status server --json", "unsupported request"),
+            (PeerAllowList.markerPrefix + "\(herdr) --session work status server --json; \(touch)", "unsupported request"),
+            (PeerAllowList.markerPrefix + "\(herdr) session list --json\n\(touch)\n", "unsupported request"),
+            (PeerAllowList.markerPrefix + "version=$(\(touch))\n", "unsupported request"),
+            (PeerAllowList.markerPrefix + "exec \(herdr) --session work remote-client-bridge </dev/null; \(touch)", "unsupported request"),
+            (PeerAllowList.markerPrefix + "curl http://example.invalid/install.sh | sh\n", "unsupported request"),
+            (String(repeating: "x", count: 16385), "request too long"),
+        ]
+        for (script, reason) in scripts {
+            let run = try runDispatcher("/bin/sh -s", input: Data(script.utf8))
+            XCTAssertEqual(run.status, 64, script)
+            XCTAssertEqual(run.stdout, "", script)
+            XCTAssertEqual(run.stderr, "wooloo-peer-bridge: \(reason)\n", script)
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
         XCTAssertEqual(presenceFiles(), [])
@@ -386,6 +516,70 @@ final class PeerPairingTests: XCTestCase {
         let missing = try runDispatcher("wooloo-peer hello")
         XCTAssertEqual(missing.status, 64)
         XCTAssertEqual(missing.stderr, "wooloo-peer-bridge: Herdr is not installed at the paired path; pair this device again\n")
+    }
+
+    // MARK: Sync cap
+
+    func testSyncPassesLinesUpToTheCapAndNoFurther() throws {
+        try installFakeSync()
+        let missing = try runDispatcher("wooloo-peer sync", input: Data("x\n".utf8))
+        XCTAssertEqual(missing.status, 0, missing.stderr)
+
+        // A line of exactly the limit goes through (the stream gets the line plus its newline).
+        let limit = PeerAllowList.syncLineLimit
+        let exact = String(repeating: "a", count: limit) + "\n"
+        let ok = try runDispatcher("wooloo-peer sync", input: Data(exact.utf8))
+        XCTAssertEqual(ok.status, 0, ok.stderr)
+        XCTAssertEqual(ok.stdout, "sync-args:exchange\n" + exact)
+        XCTAssertEqual(ok.stderr, "")
+
+        // One byte more: lines before it still arrive, the long line and everything after never do.
+        let long = "ok\n" + String(repeating: "a", count: limit + 1) + "\nafter\n"
+        let over = try runDispatcher("wooloo-peer sync", input: Data(long.utf8))
+        XCTAssertEqual(over.stdout, "sync-args:exchange\nok\n")
+        XCTAssertEqual(over.stderr, "wooloo-peer-bridge: sync input over the size limit\n")
+    }
+
+    func testSyncStopsAtTheStreamCapAndRunsNoRequestText() throws {
+        try installFakeSync()
+        let marker = directory.appendingPathComponent("ran")
+        let line = String(repeating: "b", count: PeerAllowList.syncLineLimit - 1) + "\n"   // 1 MiB with newline
+        let lines = PeerAllowList.syncStreamLimit / PeerAllowList.syncLineLimit
+        let input = String(repeating: line, count: lines + 1)
+        let run = try runDispatcher("wooloo-peer sync", input: Data(input.utf8))
+        XCTAssertEqual(run.stderr, "wooloo-peer-bridge: sync input over the size limit\n")
+        XCTAssertEqual(run.stdout.utf8.count, "sync-args:exchange\n".utf8.count + lines * line.utf8.count)
+
+        // Input is data for wooloo-sync only: shell syntax in it is never evaluated.
+        let hostile = "$(touch \(marker.path))\n`touch \(marker.path)`\n; touch \(marker.path)\n"
+        let echoed = try runDispatcher("wooloo-peer sync", input: Data(hostile.utf8))
+        XCTAssertEqual(echoed.stdout, "sync-args:exchange\n" + hostile)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    func testSyncWithoutTheBinaryFailsCleanly() throws {
+        try makeFakeHerdr()
+        let run = try runDispatcher("wooloo-peer sync", input: Data("x\n".utf8))
+        XCTAssertEqual(run.status, 64)
+        XCTAssertEqual(run.stderr, "wooloo-peer-bridge: wooloo-sync not found\n")
+    }
+
+    // MARK: Allow-list file
+
+    func testAllowListTableEqualsTheJSONFile() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent("docs/peer-allowlist.json"))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(json["revision"] as? Int, 2)
+        XCTAssertEqual(json["provisional"] as? Bool, false)
+        XCTAssertEqual(json["marker"] as? String, PeerAllowList.marker)
+        XCTAssertEqual(json["markerPrefix"] as? String, PeerAllowList.markerPrefix)
+        let entries = try XCTUnwrap(json["entries"] as? [[String: Any]]).map {
+            PeerAllowList.Entry(name: $0["name"] as? String ?? "", transport: PeerAllowList.Transport(rawValue: $0["transport"] as? String ?? "") ?? .argv,
+                                template: $0["template"] as? String ?? "")
+        }
+        XCTAssertEqual(entries, PeerAllowList.entries)
+        XCTAssertEqual(entries.count, 20)
     }
 
     func testDispatcherRecordsPresenceForBridgesOnly() throws {
@@ -407,7 +601,8 @@ final class PeerPairingTests: XCTestCase {
         XCTAssertEqual(PeerPresence.scan(directory: presence, isAlive: { _, _ in false }), [:])
         XCTAssertEqual(presenceFiles(), [])
 
-        let unnamed = try runDispatcher("exec /opt/herdr remote-client-bridge")
+        let unnamed = try runDispatcher("printf '\n%s\n' 'herdr-remote-output-ready:1'\nexec \(fakeHerdrPath) remote-client-bridge")
+        XCTAssertEqual(unnamed.status, 0, unnamed.stderr)
         XCTAssertEqual(PeerPresence.scan(directory: presence, isAlive: { pid, _ in pid == unnamed.pid }), ["default": ["p"]])
     }
 
