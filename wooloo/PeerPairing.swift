@@ -178,6 +178,9 @@ enum PeerPairing {
     static func sshDirectory(home: URL) -> URL { home.appendingPathComponent(".ssh", isDirectory: true) }
     static func peersDirectory(home: URL) -> URL { sshDirectory(home: home).appendingPathComponent("wooloo_peers", isDirectory: true) }
     static func dispatcherURL(home: URL) -> URL { home.appendingPathComponent(".local/share/wooloo/peer-bridge") }
+    /// The space-free path the dispatcher runs as Herdr (a symbolic link to the real binary). The
+    /// real path usually sits under "Application Support", which the forced command cannot hold safely.
+    static func stableHerdrURL(home: URL) -> URL { home.appendingPathComponent(".local/share/wooloo/peer/herdr") }
     static func presenceDirectory(home: URL) -> URL { home.appendingPathComponent(".local/state/wooloo/peer-presence", isDirectory: true) }
 
     /// `<user>@<host name>`, for the user to replace with the Tailscale name; empty host if none is usable.
@@ -249,7 +252,8 @@ enum PeerPairing {
                      herdrVersion: String, addInclude: Bool) throws -> Outcome {
         let id = code.peerID
         let options = try authorizedKeyOptions(home: home.path, peerID: id)
-        try installDispatcher(home: home, herdr: herdr, version: herdrVersion)
+        let stable = try refreshHerdrLink(home: home, herdr: herdr)
+        try installDispatcher(home: home, herdr: stable, version: herdrVersion)
         var outcome = Outcome()
         outcome.keyAlreadyAuthorized = !(try authorize(code.publicKey + " " + alias(id), options: options, home: home, user: user))
         try writePeerFiles(code, home: home)
@@ -268,6 +272,36 @@ enum PeerPairing {
         }
         guard matches(peerID, #"^[A-Za-z0-9_-]{1,32}$"#) else { throw WorkspaceFileError.message("Invalid peer name.") }
         return #"command=""# + home + "/.local/share/wooloo/peer-bridge --peer " + peerID + #"",restrict"#
+    }
+
+    /// Points `~/.local/share/wooloo/peer/herdr` at `herdr` (absolute, executable) and returns that
+    /// stable path. Idempotent; a changed target is swapped with an atomic rename, never a gap.
+    @available(*, noasync, message: "Blocks its thread: call it inside BlockingWork.run")
+    @discardableResult
+    static func refreshHerdrLink(home: URL, herdr: String) throws -> String {
+        guard herdr.hasPrefix("/"), !herdr.unicodeScalars.contains(where: { $0.value < 0x20 }),
+              FileManager.default.isExecutableFile(atPath: herdr) else {
+            throw WorkspaceFileError.message("Herdr was not found at \(herdr).")
+        }
+        let link = stableHerdrURL(home: home)
+        let directory = try ensureDirectory(link.deletingLastPathComponent())
+        let manager = FileManager.default
+        if (try? manager.destinationOfSymbolicLink(atPath: link.path)) == herdr { return link.path }
+        let temporary = directory.appendingPathComponent(".herdr.\(UUID().uuidString)")
+        guard symlink(herdr, temporary.path) == 0 else { throw WorkspaceFileError.message("Could not create \(link.path).") }
+        guard rename(temporary.path, link.path) == 0 else {
+            try? manager.removeItem(at: temporary)
+            throw WorkspaceFileError.message("Could not replace \(link.path).")
+        }
+        return link.path
+    }
+
+    /// At launch: when this Mac is already paired, re-point the link at the current Herdr (it moves
+    /// when Herdr updates). The dispatcher text never changes, so pairings stay valid.
+    @available(*, noasync, message: "Blocks its thread: call it inside BlockingWork.run")
+    static func refreshHerdrLinkIfPaired(home: URL, herdr: String?) {
+        guard let herdr, FileManager.default.fileExists(atPath: dispatcherURL(home: home).path) else { return }
+        _ = try? refreshHerdrLink(home: home, herdr: herdr)
     }
 
     static func dispatcherScript(herdr: String, version: String) -> String {

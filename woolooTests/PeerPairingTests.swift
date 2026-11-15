@@ -226,6 +226,57 @@ final class PeerPairingTests: XCTestCase {
                        ["add", "wooloo-peer-work-pc", "--remote-session", "work", "--label", "Work PC"])
     }
 
+    private func makeSpacedHerdr() throws -> String {
+        let spaced = directory.appendingPathComponent("Application Support/wooloo/herdr", isDirectory: true)
+        try FileManager.default.createDirectory(at: spaced, withIntermediateDirectories: true)
+        let real = spaced.appendingPathComponent("herdr")
+        try FileManager.default.copyItem(atPath: try makeFakeHerdr(), toPath: real.path)
+        return real.path
+    }
+
+    func testPairWithSpacedHerdrPathUsesSafeStableLink() throws {
+        let real = try makeSpacedHerdr()
+        XCTAssertTrue(real.contains(" "))
+        try PeerPairing.pair(try code(), home: directory, herdr: real, herdrVersion: "0.9.5", addInclude: false)
+        let stable = PeerPairing.stableHerdrURL(home: directory).path
+        XCTAssertTrue(PeerPairing.matches(stable, #"^/[A-Za-z0-9._/-]+$"#))
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: stable), real)
+        let script = try read(PeerPairing.dispatcherURL(home: directory))
+        XCTAssertTrue(script.contains("peer_herdr=" + WorkspaceFiles.quote(stable)))
+        XCTAssertFalse(script.contains("Application Support"))
+    }
+
+    func testPairWithCleanHerdrPathAlsoUsesStableLink() throws {
+        let real = try makeFakeHerdr()
+        try PeerPairing.pair(try code(), home: directory, herdr: real, herdrVersion: "0.9.5", addInclude: false)
+        let stable = PeerPairing.stableHerdrURL(home: directory).path
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: stable), real)
+        XCTAssertTrue(try read(PeerPairing.dispatcherURL(home: directory)).contains("peer_herdr=" + WorkspaceFiles.quote(stable)))
+    }
+
+    func testRefreshHerdrLinkIsIdempotentAndRepointsAtomically() throws {
+        let first = try makeFakeHerdr()
+        let stable = try PeerPairing.refreshHerdrLink(home: directory, herdr: first)
+        XCTAssertEqual(stable, PeerPairing.stableHerdrURL(home: directory).path)
+        XCTAssertEqual(try PeerPairing.refreshHerdrLink(home: directory, herdr: first), stable)
+        let second = try makeSpacedHerdr()
+        try PeerPairing.refreshHerdrLink(home: directory, herdr: second)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: stable), second)
+        let left = try FileManager.default.contentsOfDirectory(atPath: (stable as NSString).deletingLastPathComponent)
+        XCTAssertEqual(left, ["herdr"])
+        XCTAssertThrowsError(try PeerPairing.refreshHerdrLink(home: directory, herdr: "relative/herdr"))
+        XCTAssertThrowsError(try PeerPairing.refreshHerdrLink(home: directory, herdr: directory.appendingPathComponent("nope").path))
+    }
+
+    func testRefreshAtLaunchOnlyWhenPaired() throws {
+        let real = try makeFakeHerdr()
+        PeerPairing.refreshHerdrLinkIfPaired(home: directory, herdr: real)
+        XCTAssertNil(try? FileManager.default.destinationOfSymbolicLink(atPath: PeerPairing.stableHerdrURL(home: directory).path))
+        try PeerPairing.installDispatcher(home: directory, herdr: real, version: "0.9.5")
+        PeerPairing.refreshHerdrLinkIfPaired(home: directory, herdr: real)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: PeerPairing.stableHerdrURL(home: directory).path), real)
+    }
+
     func testInstallDispatcherRejectsUnsafeHerdrPathOrVersion() throws {
         XCTAssertThrowsError(try PeerPairing.installDispatcher(home: directory, herdr: "/opt/my herdr", version: "0.9.5"))
         XCTAssertThrowsError(try PeerPairing.installDispatcher(home: directory, herdr: "herdr", version: "0.9.5"))
@@ -257,7 +308,7 @@ final class PeerPairingTests: XCTestCase {
         XCTAssertTrue(first.includeAdded)
 
         let dispatcher = PeerPairing.dispatcherURL(home: directory)
-        XCTAssertEqual(try read(dispatcher), PeerPairing.dispatcherScript(herdr: herdr, version: "0.9.5"))
+        XCTAssertEqual(try read(dispatcher), PeerPairing.dispatcherScript(herdr: PeerPairing.stableHerdrURL(home: directory).path, version: "0.9.5"))
         XCTAssertEqual(try permissions(dispatcher), 0o700)
         let keys = try read(directory.appendingPathComponent(".ssh/authorized_keys"))
         XCTAssertTrue(keys.hasPrefix(#"command=""# + dispatcher.path + #" --peer work-pc",restrict "#), keys)
