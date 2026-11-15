@@ -184,9 +184,12 @@ enum MobileSSHAccess {
 
     /// A lock and atomic replacement protect existing entries. An existing key with options is
     /// left as-is: authorizing it again must never remove restrictions imposed by an administrator.
-    static func installationScript(homeDirectory: String, user: String) -> String {
+    /// `options` (already validated by the caller) prefix a newly added entry, such as a peer's
+    /// forced command; they are never applied to a key that is already present.
+    static func installationScript(homeDirectory: String, user: String, options: String = "") -> String {
         "task_home=" + WorkspaceFiles.quote(homeDirectory) + "\n"
-        + "task_user=" + WorkspaceFiles.quote(user) + "\n" + #"""
+        + "task_user=" + WorkspaceFiles.quote(user) + "\n"
+        + "task_options=" + WorkspaceFiles.quote(options) + "\n" + #"""
         set -eu
         umask 077
         task_fail() { printf '%s\n' "$1" >&2; exit 1; }
@@ -245,7 +248,7 @@ enum MobileSSHAccess {
         fi
         task_temp=$(mktemp "$task_directory/.authorized_keys.XXXXXXXX")
         if [ -f "$task_file" ]; then cat "$task_file" > "$task_temp"; printf '\n' >> "$task_temp"; fi
-        printf '%s\n' "$task_key" >> "$task_temp"
+        if [ -n "$task_options" ]; then printf '%s %s\n' "$task_options" "$task_key" >> "$task_temp"; else printf '%s\n' "$task_key" >> "$task_temp"; fi
         chmod 600 "$task_temp"
         mv -f "$task_temp" "$task_file"
         task_temp=''

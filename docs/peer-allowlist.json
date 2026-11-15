@@ -1,0 +1,222 @@
+{
+  "format": "wooloo-peer-allowlist-v1",
+  "provisional": false,
+  "revision": 2,
+  "herdrVersion": "0.9.5",
+  "source": "herdrdev/herdr 2ecf19a src/remote/attach.rs, src/remote/saved.rs",
+  "matching": "Every request must equal one template exactly, byte for byte, after the slots are filled. No globbing, no trimming, no shell evaluation of the request. Anything else is refused with exit 64 and 'wooloo-peer-bridge: <reason>' on stderr.",
+  "marker": "herdr-remote-output-ready:1",
+  "markerPrefix": "printf '\n%s\n' 'herdr-remote-output-ready:1'\n",
+  "transports": {
+    "argv": "The request is SSH_ORIGINAL_COMMAND.",
+    "stdin": "SSH_ORIGINAL_COMMAND is exactly '/bin/sh -s'; stdin (at most 16384 bytes) must be markerPrefix followed by the template."
+  },
+  "markerResponse": "Requests framed with markerPrefix (all stdin ones, and argv ones whose template starts with it) get the line 'herdr-remote-output-ready:1' on stdout, preceded by an empty line, before any other output.",
+  "slots": {
+    "herdr": "the Herdr path recorded at pairing time, exactly; ^/[A-Za-z0-9._/-]+$ (left bare by Herdr's shell_quote)",
+    "session": "^[A-Za-z0-9_-]{1,64}$",
+    "sessionArgs": "empty when the session is 'default', else '--session {session} ' (one trailing space)",
+    "version": "^[0-9A-Za-z.+-]{1,32}$, the client's Herdr version, any value in that set"
+  },
+  "entries": [
+    {
+      "name": "wooloo-hello",
+      "transport": "argv",
+      "template": "wooloo-peer hello",
+      "response": "print 'wooloo-peer-bridge-v1 <paired herdr version>'",
+      "notes": "wooloo's own probe."
+    },
+    {
+      "name": "wooloo-api",
+      "transport": "argv",
+      "template": "wooloo-peer api {session}",
+      "response": "exec herdr --session {session} remote-api-bridge",
+      "notes": "Writes presence.",
+      "slots": [
+        "session"
+      ]
+    },
+    {
+      "name": "wooloo-client",
+      "transport": "argv",
+      "template": "wooloo-peer client {session}",
+      "response": "exec herdr --session {session} remote-client-bridge",
+      "notes": "Writes presence.",
+      "slots": [
+        "session"
+      ]
+    },
+    {
+      "name": "wooloo-check",
+      "transport": "argv",
+      "template": "wooloo-peer check {session}",
+      "response": "exec herdr --session {session} remote-api-bridge --check",
+      "notes": "No presence.",
+      "slots": [
+        "session"
+      ]
+    },
+    {
+      "name": "wooloo-sync",
+      "transport": "argv",
+      "template": "wooloo-peer sync",
+      "response": "exec wooloo-sync exchange (stdin/stdout passthrough); the responder takes no arguments, executes nothing, and touches only its own sync state file",
+      "notes": "Metadata sync (docs/sync-protocol.md). Added in revision 2; the Mac copy must mirror this entry and the revision."
+    },
+    {
+      "name": "herdr-path-probe",
+      "transport": "argv",
+      "template": "printf '\n%s\n' 'herdr-remote-output-ready:1'\ncommand -v herdr",
+      "response": "marker line, then the paired herdr path",
+      "notes": "remote_binary_on_path_any / warn_if_remote_bin_not_on_path (posix_user_shell_output)."
+    },
+    {
+      "name": "herdr-client-bridge",
+      "transport": "argv",
+      "template": "printf '\n%s\n' 'herdr-remote-output-ready:1'\nexec {herdr} {sessionArgs}remote-client-bridge",
+      "response": "marker line, then exec herdr {sessionArgs}remote-client-bridge",
+      "notes": "SshStdioBridge::start (bridge_command). Writes presence.",
+      "slots": [
+        "herdr",
+        "sessionArgs"
+      ]
+    },
+    {
+      "name": "herdr-client-bridge-idle",
+      "transport": "argv",
+      "template": "printf '\n%s\n' 'herdr-remote-output-ready:1'\nexec {herdr} {sessionArgs}remote-client-bridge --idle-timeout-v1",
+      "response": "marker line, then exec herdr {sessionArgs}remote-client-bridge --idle-timeout-v1",
+      "notes": "Noninteractive bridge with idle timeout. Writes presence.",
+      "slots": [
+        "herdr",
+        "sessionArgs"
+      ]
+    },
+    {
+      "name": "herdr-api-bridge",
+      "transport": "argv",
+      "template": "printf '\n%s\n' 'herdr-remote-output-ready:1'\nexec {herdr} --session {session} remote-api-bridge",
+      "response": "marker line, then exec herdr --session {session} remote-api-bridge",
+      "notes": "remote_api_bridge_command(check=false); always passes --session. Writes presence.",
+      "slots": [
+        "herdr",
+        "session"
+      ]
+    },
+    {
+      "name": "herdr-api-check",
+      "transport": "argv",
+      "template": "printf '\n%s\n' 'herdr-remote-output-ready:1'\nexec {herdr} --session {session} remote-api-bridge --check",
+      "response": "marker line, then exec herdr --session {session} remote-api-bridge --check",
+      "notes": "remote_api_bridge_command(check=true). No presence.",
+      "slots": [
+        "herdr",
+        "session"
+      ]
+    },
+    {
+      "name": "herdr-api-discovery",
+      "transport": "argv",
+      "template": "/bin/sh -c 'printf '\\''\n%s\n'\\'' '\\''herdr-remote-output-ready:1'\\''\nset -f\ncandidates=$(\ncommand -v herdr\nhome=${HOME:-}\nuser=${USER:-}\nversion={version}\nemit() {\n    path=$1\n    if [ -n \"$path\" ] && [ -x \"$path\" ]; then\n        printf '\\''%s\\n'\\'' \"$path\"\n    fi\n}\nif [ -n \"$home\" ]; then\n    emit \"$home/.local/bin/herdr\"\nfi\n    emit \"/opt/homebrew/bin/herdr\"\n    emit \"/usr/local/bin/herdr\"\nif [ -n \"$home\" ]; then\n    emit \"$home/.local/share/mise/installs/herdr/$version/bin/herdr\"\n    emit \"$home/.local/share/mise/installs/herdr/$version/herdr\"\n    emit \"$home/.local/share/mise/installs/github-ogulcancelik-herdr/$version/herdr\"\n    emit \"$home/.nix-profile/bin/herdr\"\nfi\nif [ -n \"$user\" ]; then\n    emit \"/etc/profiles/per-user/$user/bin/herdr\"\nfi\nemit \"/nix/var/nix/profiles/default/bin/herdr\"\nemit \"/run/current-system/sw/bin/herdr\"\n\n)\nIFS='\\''\n'\\''\nfor candidate in $candidates; do\n    case \"$candidate\" in\n        */mise/shims/herdr) continue ;;\n        /*) ;;\n        *) continue ;;\n    esac\n    [ -x \"$candidate\" ] || continue\n    if capability=$(\"$candidate\" --session {session} remote-api-bridge --check </dev/null 2>/dev/null) && [ \"$capability\" = herdr-api-bridge-v1 ]; then\n        printf '\\''%s\\n'\\'' \"$candidate\"\n        exit 0\n    fi\ndone\nprintf '\\''%s\\n'\\'' '\\''remote Herdr does not support machine API forwarding; update Herdr on this machine'\\'' >&2\nexit 2'",
+      "response": "marker line, then the paired herdr path if 'herdr --session {session} remote-api-bridge --check' prints herdr-api-bridge-v1, else the script's stderr line and exit 2",
+      "notes": "posix_remote_api_discovery_command (framed_user_shell_output). {session} is bare (shell_quote leaves valid names unquoted); {version} is the client's own Herdr version.",
+      "slots": [
+        "session",
+        "version"
+      ]
+    },
+    {
+      "name": "herdr-cached-api",
+      "transport": "argv",
+      "template": "/bin/sh -c 'if capability=$({herdr} --session {session} remote-api-bridge --check </dev/null 2>/dev/null) && [ \"$capability\" = herdr-api-bridge-v1 ]; then\nprintf '\\''\n%s\n'\\'' '\\''herdr-remote-output-ready:1'\\''\nexec {herdr} --session {session} remote-api-bridge\nelse\n    printf '\\''%s\\n'\\'' '\\''herdr-machine-metadata-stale-v1'\\'' >&2\n    exit 78\nfi'",
+      "response": "if the --check succeeds: marker line, then exec herdr --session {session} remote-api-bridge; else 'herdr-machine-metadata-stale-v1' on stderr, exit 78",
+      "notes": "saved.rs cached_remote_api_command. Writes presence when the bridge runs.",
+      "slots": [
+        "herdr",
+        "session"
+      ]
+    },
+    {
+      "name": "sh-uname",
+      "transport": "stdin",
+      "template": "uname -s\nuname -m\n",
+      "response": "marker line, then uname -s and uname -m output",
+      "notes": "detect_remote_platform."
+    },
+    {
+      "name": "sh-path-probe",
+      "transport": "stdin",
+      "template": "command -v herdr\n",
+      "response": "marker line, then the paired herdr path",
+      "notes": "remote_binary_on_path_any fallback."
+    },
+    {
+      "name": "sh-candidates",
+      "transport": "stdin",
+      "template": "home=${HOME:-}\nuser=${USER:-}\nversion={version}\nemit() {\n    path=$1\n    if [ -n \"$path\" ] && [ -x \"$path\" ]; then\n        printf '%s\\n' \"$path\"\n    fi\n}\nif [ -n \"$home\" ]; then\n    emit \"$home/.local/bin/herdr\"\nfi\n    emit \"/opt/homebrew/bin/herdr\"\n    emit \"/usr/local/bin/herdr\"\nif [ -n \"$home\" ]; then\n    emit \"$home/.local/share/mise/installs/herdr/$version/bin/herdr\"\n    emit \"$home/.local/share/mise/installs/herdr/$version/herdr\"\n    emit \"$home/.local/share/mise/installs/github-ogulcancelik-herdr/$version/herdr\"\n    emit \"$home/.nix-profile/bin/herdr\"\nfi\nif [ -n \"$user\" ]; then\n    emit \"/etc/profiles/per-user/$user/bin/herdr\"\nfi\nemit \"/nix/var/nix/profiles/default/bin/herdr\"\nemit \"/run/current-system/sw/bin/herdr\"\n",
+      "response": "marker line, then the paired herdr path",
+      "notes": "known_remote_binary_candidate_script (macOS variant; Linux adds the linuxbrew line and is refused).",
+      "slots": [
+        "version"
+      ]
+    },
+    {
+      "name": "sh-exists",
+      "transport": "stdin",
+      "template": "test -x {herdr}",
+      "response": "marker line; exit 0",
+      "notes": "remote_binary_exists.",
+      "slots": [
+        "herdr"
+      ]
+    },
+    {
+      "name": "sh-client-status",
+      "transport": "stdin",
+      "template": "test -x {herdr} && {herdr} status client --json",
+      "response": "marker line, then exec herdr status client --json",
+      "notes": "remote_client_status.",
+      "slots": [
+        "herdr"
+      ]
+    },
+    {
+      "name": "sh-server-status",
+      "transport": "stdin",
+      "template": "{herdr} {sessionArgs}status server --json",
+      "response": "marker line, then exec herdr {sessionArgs}status server --json",
+      "notes": "remote_server_status.",
+      "slots": [
+        "herdr",
+        "sessionArgs"
+      ]
+    },
+    {
+      "name": "sh-session-list",
+      "transport": "stdin",
+      "template": "{herdr} session list --json",
+      "response": "marker line, then exec herdr session list --json",
+      "notes": "running_sessions.",
+      "slots": [
+        "herdr"
+      ]
+    },
+    {
+      "name": "sh-saved-bridge",
+      "transport": "stdin",
+      "template": "exec {herdr} {sessionArgs}remote-client-bridge </dev/null",
+      "response": "marker line, then exec herdr {sessionArgs}remote-client-bridge with stdin from /dev/null",
+      "notes": "Start of a saved profile (saved_bridge_command). Writes presence.",
+      "slots": [
+        "herdr",
+        "sessionArgs"
+      ]
+    }
+  ],
+  "refused": [
+    "Any other '/bin/sh -s' stdin script, including Herdr's install scripts (attach.rs install_herdr)",
+    "Live handoff (live_handoff_command) and server stop/shutdown commands",
+    "The Linux candidate script and every Windows PowerShell form",
+    "Requests over 16384 bytes, empty requests, or anything with a bad peer name"
+  ]
+}

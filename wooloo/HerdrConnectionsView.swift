@@ -20,6 +20,8 @@ struct HerdrConnectionsView: View {
     @State private var rename: HerdrMachineProfile?
     @State private var newLabel = ""
     @State private var confirmation: ProfileAction?
+    @State private var pairing = false
+    @State private var presence: [String: [String]] = [:]
 
     private struct ProfileAction: Identifiable {
         let profile: HerdrMachineProfile
@@ -77,6 +79,7 @@ struct HerdrConnectionsView: View {
                 }
                 Spacer()
                 Button("Add…", systemImage: "plus") { adding = true }
+                Button("Pair Device…") { pairing = true }
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }
             HSplitView {
@@ -88,6 +91,9 @@ struct HerdrConnectionsView: View {
                             Text(status(connection)).font(.caption).foregroundStyle(.secondary)
                             Text(opened(connection) == nil ? "Not open in this window" : "Open in this window")
                                 .font(.caption)
+                            if connection.machine == nil, let peers = presence[connection.session], !peers.isEmpty {
+                                Text("Attached: " + peers.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                         .padding(.vertical, 4)
                         .tag(connection.id)
@@ -142,6 +148,17 @@ struct HerdrConnectionsView: View {
         }
         .task(id: destinations.recoverySpaces) { await documents.recoverConnectionDrafts(in: destinations.recoverySpaces) }
         .sheet(isPresented: $adding) { addForm }
+        .sheet(isPresented: $pairing) { PeerPairingView(catalog: catalog, destinations: destinations) }
+        .task {
+            // Paired peers' open bridges, from the dispatcher's presence files (docs/peer-pairing.md).
+            let directory = PeerPairing.presenceDirectory(home: FileManager.default.homeDirectoryForCurrentUser)
+            while !Task.isCancelled {
+                if let scanned = await BlockingWork.run({ Optional(PeerPresence.scan(directory: directory)) }), scanned != presence {
+                    presence = scanned
+                }
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
         .alert("Rename SSH Profile", isPresented: Binding(get: { rename != nil }, set: { if !$0 { rename = nil } })) {
             TextField("Label", text: $newLabel)
             Button("Save") {
