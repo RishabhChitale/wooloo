@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "now": 1763112001000,
+  "herdr_version": "0.5.0",
+  "initiator_node": "mac-3f9a21c0",
+  "responder_node": "win-07be55d1",
+  "initiator": [
+    {"key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11", "field": "name", "value": "Study", "hlc": {"wall": 1763112000000, "counter": 0}, "node": "mac-3f9a21c0"},
+    {"key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11", "field": "name", "value": "Study Central", "hlc": {"wall": 1763112000500, "counter": 1}, "node": "mac-3f9a21c0"},
+    {"key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11", "field": "category", "value": "school", "hlc": {"wall": 1763112000600, "counter": 0}, "node": "mac-3f9a21c0"},
+    {"key": "space:0b8d3e94-5a17-4c2f-8e60-7d1a9b3c4f22", "field": "name", "value": "Scratch", "hlc": {"wall": 1763112000100, "counter": 0}, "node": "mac-3f9a21c0"}
+  ],
+  "responder": [
+    {"key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11", "field": "name", "value": "Study", "hlc": {"wall": 1763112000000, "counter": 0}, "node": "mac-3f9a21c0"},
+    {"key": "space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11", "field": "color", "value": "#112233", "hlc": {"wall": 1763112000300, "counter": 0}, "node": "win-07be55d1"},
+    {"key": "space:0b8d3e94-5a17-4c2f-8e60-7d1a9b3c4f22", "field": "name", "value": "Scratch", "hlc": {"wall": 1763112000100, "counter": 0}, "node": "mac-3f9a21c0"},
+    {"key": "space:0b8d3e94-5a17-4c2f-8e60-7d1a9b3c4f22", "field": "deleted", "value": true, "hlc": {"wall": 1763112000700, "counter": 0}, "node": "win-07be55d1"}
+  ]
+}
