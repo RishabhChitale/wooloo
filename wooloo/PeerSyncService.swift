@@ -25,7 +25,7 @@ final class PeerSyncPipeOutput: PeerSyncOutput {
 }
 
 /// What one exchange changed.
-struct PeerSyncOutcome: Equatable {
+struct PeerSyncExchangeResult: Equatable {
     var peerNode: String
     var received: Int
     var accepted: UInt64
@@ -63,18 +63,18 @@ final class PeerSyncEngine: @unchecked Sendable {
     }
 
     /// Applies what the peer sent back, then refreshes the unit categories file from the merged replica.
-    func finish(_ initiated: PeerSyncInitiated) throws -> PeerSyncOutcome {
+    func finish(_ initiated: PeerSyncInitiated) throws -> PeerSyncExchangeResult {
         try store.withState { state in
             let now = clock()
             for op in initiated.reply { _ = state.replica.apply(op, now: now) }
             if let url = unitCatsURL { _ = try PeerSyncUnitCats.exportFile(url, from: &state) }
-            return PeerSyncOutcome(peerNode: initiated.peer, received: initiated.reply.count,
+            return PeerSyncExchangeResult(peerNode: initiated.peer, received: initiated.reply.count,
                                    accepted: initiated.accepted, rejected: initiated.rejected)
         }
     }
 
     /// One full exchange as the initiator over the given channel. The store lock is not held while the network is.
-    func exchange(input: PeerSyncInput, output: PeerSyncOutput) throws -> PeerSyncOutcome {
+    func exchange(input: PeerSyncInput, output: PeerSyncOutput) throws -> PeerSyncExchangeResult {
         let regs = try prepare()
         let me = try node()
         let initiated = try PeerSyncExchange.initiate(input: input, output: output, node: me, regs: regs)
@@ -151,7 +151,7 @@ enum PeerSyncStatus: Equatable {
 /// Keeps one peer's metadata in step with this machine: on a timer, on request, with backoff, off the main thread.
 @MainActor
 final class PeerSyncService: ObservableObject, PeerSpaceMetadataProviding {
-    typealias Transport = @Sendable (HerdrMachineProfile, PeerSyncEngine) throws -> PeerSyncOutcome
+    typealias Transport = @Sendable (HerdrMachineProfile, PeerSyncEngine) throws -> PeerSyncExchangeResult
 
     @Published private(set) var status: PeerSyncStatus = .idle
     @Published private(set) var revision = 0
@@ -253,22 +253,31 @@ final class PeerSyncService: ObservableObject, PeerSpaceMetadataProviding {
         return replica.spaceView(uuid).name
     }
 
+    /// Pure diff: a label that moved locally is published; a replica name that differs while the local label is
+    /// unchanged is a remote edit and gets applied. `known` stops either side echoing back.
+    nonisolated static func labelPlan(current: [String: String], known: [String: String], remote: [String: String])
+        -> (renames: [String: String], published: [String], known: [String: String]) {
+        var renames: [String: String] = [:], published: [String] = [], next: [String: String] = [:]
+        for (id, label) in current {
+            if let was = known[id] {
+                if label != was { published.append(id); next[id] = label }
+                else if let r = remote[id], r != label { renames[id] = r; next[id] = r }
+                else { next[id] = label }
+            } else if let r = remote[id], r != label { renames[id] = r; next[id] = r }
+            else { next[id] = label; published.append(id) }
+        }
+        return (renames, published, next)
+    }
+
     func reconcile() {
         guard let store = localStore, let snap = store.snapshot, let node = try? engine.node() else { return }
-        var edited: [(id: String, label: String)] = []
-        for w in snap.workspaces {
-            let remote = syncedName(w.workspaceID, node: node)
-            if let was = known[w.workspaceID] {
-                if w.label != was { edited.append((w.workspaceID, w.label)); known[w.workspaceID] = w.label }
-                else if let remote, remote != w.label { store.renameWorkspace(w.workspaceID, to: remote); known[w.workspaceID] = remote }
-            } else if let remote, remote != w.label {
-                store.renameWorkspace(w.workspaceID, to: remote); known[w.workspaceID] = remote
-            } else {
-                known[w.workspaceID] = w.label
-                edited.append((w.workspaceID, w.label))
-            }
-        }
-        known = known.filter { k, _ in snap.workspaces.contains { $0.workspaceID == k } }
+        let labels = snap.workspaces.map { ($0.workspaceID, $0.label) }
+        var remote: [String: String] = [:]
+        for (id, _) in labels { if let n = syncedName(id, node: node) { remote[id] = n } }
+        let plan = Self.labelPlan(current: Dictionary(labels, uniquingKeysWith: { a, _ in a }), known: known, remote: remote)
+        known = plan.known
+        for (id, name) in plan.renames { store.renameWorkspace(id, to: name) }
+        let edited = plan.published
         guard !edited.isEmpty else { return }
         let engine = engine
         let all = snap.workspaces.map { ($0.workspaceID, $0.label) }
@@ -299,7 +308,7 @@ final class PeerSyncService: ObservableObject, PeerSpaceMetadataProviding {
     }
 
     /// Runs `wooloo-peer sync` over ssh and drives the exchange on the process pipes. A watchdog ends a stuck link.
-    nonisolated static func sshTransport(_ machine: HerdrMachineProfile, _ engine: PeerSyncEngine) throws -> PeerSyncOutcome {
+    nonisolated static func sshTransport(_ machine: HerdrMachineProfile, _ engine: PeerSyncEngine) throws -> PeerSyncExchangeResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: WorkspaceFiles.sshExecutable)
         process.arguments = syncArguments(machine)

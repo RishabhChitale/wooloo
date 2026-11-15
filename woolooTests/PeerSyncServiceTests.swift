@@ -22,7 +22,7 @@ final class PeerSyncServiceTests: XCTestCase {
 
     /// One exchange, A initiating. `partitioned` makes the link fail before anything is sent.
     @discardableResult
-    private func sync(_ a: PeerSyncEngine, _ b: PeerSyncEngine, partitioned: Bool = false) throws -> PeerSyncOutcome {
+    private func sync(_ a: PeerSyncEngine, _ b: PeerSyncEngine, partitioned: Bool = false) throws -> PeerSyncExchangeResult {
         if partitioned { throw PeerSyncError.io("partitioned") }
         let aToB = Pipe(), bToA = Pipe()
         var responderError: Error?
@@ -100,5 +100,16 @@ final class PeerSyncServiceTests: XCTestCase {
         let now = Date()
         XCTAssertEqual(PeerSyncStatus.synced(now.addingTimeInterval(-12)).label(now: now), "synced 12 s ago")
         XCTAssertEqual(PeerSyncStatus.offline(pending: 3, reason: "x").label(), "offline, 3 pending")
+    }
+
+    @MainActor func testLabelPlanLocalAndRemoteEdits() {
+        let first = PeerSyncService.labelPlan(current: ["w1": "A"], known: [:], remote: [:])
+        XCTAssertEqual(first.published, ["w1"]); XCTAssertTrue(first.renames.isEmpty)
+        let local = PeerSyncService.labelPlan(current: ["w1": "B"], known: ["w1": "A"], remote: ["w1": "A"])
+        XCTAssertEqual(local.published, ["w1"]); XCTAssertEqual(local.known["w1"], "B")
+        let remote = PeerSyncService.labelPlan(current: ["w1": "A"], known: ["w1": "A"], remote: ["w1": "C"])
+        XCTAssertEqual(remote.renames, ["w1": "C"]); XCTAssertTrue(remote.published.isEmpty)
+        let settled = PeerSyncService.labelPlan(current: ["w1": "C"], known: remote.known, remote: ["w1": "C"])
+        XCTAssertTrue(settled.renames.isEmpty); XCTAssertTrue(settled.published.isEmpty)
     }
 }
