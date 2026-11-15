@@ -212,10 +212,11 @@ if [ ! -x "$H/.local/bin/wooloo-sync" ]; then printf '#!/bin/sh\ncat >/dev/null\
 head -c 1048577 /dev/zero | tr '\0' a > "$T/bigline"; printf '\n' >> "$T/bigline"
 out=$("${SSH_BASE[@]}" "$USER_AT" 'wooloo-peer sync' < "$T/bigline" 2>"$T/err"); rc=$?
 [ $rc -eq 65 ] && ok "oversize sync line (1 MiB + 1) -> exit 65" || bad "oversize sync line (1 MiB + 1) -> exit 65" "exit $rc stderr=[$(head -c 200 "$T/err")]"
-# a line exactly at the cap must pass (stub exits 0)
+# a line exactly at the cap must pass the cap (the real wooloo-sync rejects the garbage payload with its own
+# exit status, e.g. 1; only the cap's 65 / a refusal would be wrong)
 head -c 1048576 /dev/zero | tr '\0' a > "$T/okline"; printf '\n' >> "$T/okline"
 "${SSH_BASE[@]}" "$USER_AT" 'wooloo-peer sync' < "$T/okline" >/dev/null 2>"$T/err"; rc=$?
-[ $rc -eq 0 ] && ok "sync line at the cap (1 MiB) accepted" || bad "sync line at the cap (1 MiB) accepted" "exit $rc stderr=[$(head -c 200 "$T/err")]"
+! grep -q "size limit" "$T/err" && [ $rc -ne 65 ] && [ $rc -ne 64 ] && ok "sync line at the cap (1 MiB) passes the cap (exit $rc)" || bad "sync line at the cap (1 MiB) passes the cap" "exit $rc stderr=[$(head -c 200 "$T/err")]"
 
 echo
 echo "peer-sshd-integration: $PASS passed, $FAIL failed, $SKIP skipped"
