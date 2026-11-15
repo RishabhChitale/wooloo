@@ -1,0 +1,27 @@
+name: Peer sshd integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  peer-sshd:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: RishabhChitale/wooloo-win
+          path: wooloo-win
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+      - name: Build wooloo-sync
+        working-directory: wooloo-win
+        run: cargo build -p wooloo-sync --release
+      - name: Private sshd integration test
+        env:
+          WOOLOO_SYNC_BIN: ${{ github.workspace }}/wooloo-win/target/release/wooloo-sync
+        run: scripts/peer-sshd-integration.sh

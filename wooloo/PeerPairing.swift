@@ -499,12 +499,19 @@ enum PeerPairing {
                 peer_sync=$HOME/.local/bin/wooloo-sync
                 [ -x "$peer_sync" ] || peer_sync=$(command -v wooloo-sync 2>/dev/null) || peer_sync=
                 { [ -n "$peer_sync" ] && [ -x "$peer_sync" ]; } || peer_fail 'wooloo-sync not found'
-                awk -v line_max=1048576 -v total_max=33554432 '
+                # A pipeline reports its last command's status, so awk leaves a marker file when it
+                # stops: the cap must surface as exit 65, not as wooloo-sync's clean EOF exit.
+                peer_cap=$(mktemp "${TMPDIR:-/tmp}/wooloo-sync-cap.XXXXXX") || peer_fail 'no temporary file'
+                awk -v line_max=1048576 -v total_max=33554432 -v cap="$peer_cap" '
                     { total += length($0) + 1
                       if (length($0) > line_max || total > total_max) {
-                          print "wooloo-peer-bridge: sync input over the size limit" > "/dev/stderr"; exit 65 }
+                          print "wooloo-peer-bridge: sync input over the size limit" > "/dev/stderr"
+                          print "over" > cap; close(cap); exit 65 }
                       print; fflush() }' | "$peer_sync" exchange
-                exit $?;;
+                peer_rc=$?
+                if [ -s "$peer_cap" ]; then rm -f "$peer_cap"; exit 65; fi
+                rm -f "$peer_cap"
+                exit $peer_rc;;
             *) peer_fail 'unsupported request';;
         esac
         # Herdr bridges. Requests with {session} always pass it; {sessionArgs} ones only when set.
