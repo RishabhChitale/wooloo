@@ -161,6 +161,26 @@ final class PeerPairingTests: XCTestCase {
         XCTAssertNoThrow(try PeerPairingCode(code: rawCode(validFields)))
     }
 
+    /// Codes and targets a Windows peer (wooloo-win, crates/wooloo-core/src/pairing.rs) produces: serde_json
+    /// compact sorted-key JSON, `whoami` user part (`rish-win11\\risha` -> `risha`), Tailscale IP or MagicDNS host.
+    func testAcceptsWindowsGeneratedCodesAndTargets() throws {
+        let samples: [(String, String, String)] = [
+            ("wooloo-pair-v1:eyJoZXJkclZlcnNpb24iOiIwLjkuNSIsImhvc3RLZXkiOiJzc2gtZWQyNTUxOSBBQUFBQzNOemFDMWxaREkxTlRFNUFBQUFJQWNIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2NIQndjSCIsImxhYmVsIjoiUmlzaCBXaW4xMSIsInB1YmxpY0tleSI6InNzaC1lZDI1NTE5IEFBQUFDM056YUMxbFpESTFOVEU1QUFBQUlBY0hCd2NIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2NIIiwic2Vzc2lvbiI6Indvb2xvbyIsInRhcmdldCI6InJpc2hhQDEwMC4xMDQuMjQwLjU4In0", "risha", "100.104.240.58"),
+            ("wooloo-pair-v1:eyJoZXJkclZlcnNpb24iOiIwLjkuNSIsImhvc3RLZXkiOiJzc2gtZWQyNTUxOSBBQUFBQzNOemFDMWxaREkxTlRFNUFBQUFJQWNIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2NIQndjSCIsImxhYmVsIjoiUmlzaCBXaW4xMSIsInB1YmxpY0tleSI6InNzaC1lZDI1NTE5IEFBQUFDM056YUMxbFpESTFOVEU1QUFBQUlBY0hCd2NIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2NIIiwic2Vzc2lvbiI6Indvb2xvbyIsInRhcmdldCI6InJpc2hhQHJpc2gtd2luMTEudGFpbDdmZDNlZS50cy5uZXQifQ", "risha", "rish-win11.tail7fd3ee.ts.net"),
+        ]
+        for (text, user, host) in samples {
+            let decoded = try PeerPairingCode(code: text)
+            XCTAssertEqual(decoded.endpoint.user, user)
+            XCTAssertEqual(decoded.endpoint.host, host)
+            XCTAssertNil(decoded.endpoint.port)
+            XCTAssertEqual(decoded.label, "Rish Win11")
+            XCTAssertEqual(decoded.session, "wooloo")
+            XCTAssertEqual(decoded.herdrVersion, "0.9.5")
+            XCTAssertEqual(decoded.peerID, "rish-win11")
+            XCTAssertEqual(decoded.endpoint, try PeerPairingTarget("\(user)@\(host)"))
+        }
+    }
+
     func testTargetParsing() throws {
         let accepted: [(String, String?, String, Int?)] = [
             ("a@h", "a", "h", nil), ("h:22", nil, "h", 22), ("[fe80::1]:22", nil, "fe80::1", 22),
