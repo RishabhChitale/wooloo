@@ -71,6 +71,8 @@ final class PeerSyncInteropTests: XCTestCase {
         return (a, b)
     }
 
+    private func canonAll(_ ls: [String]) throws -> [String] { try ls.map { PeerSyncJSON.canonical(try PeerSyncJSON.parse($0)) } }
+
     private func fixture(_ name: String) -> String? { try? String(contentsOf: Self.dir.appendingPathComponent(name), encoding: .utf8) }
 
     func testScenarioConverges() throws {
@@ -100,8 +102,9 @@ final class PeerSyncInteropTests: XCTestCase {
         let s = try scenario()
         let (ini, resp) = split(text)
         let own = try run(s)
-        XCTAssertEqual(ini, own.toResponder, "\(name): initiator stream bytes")
-        XCTAssertEqual(resp, own.toInitiator, "\(name): responder reply bytes")
+        // Member order is not significant on the wire (spec 8.1), so compare messages canonically.
+        XCTAssertEqual(try canonAll(ini), try canonAll(own.toResponder), "\(name): initiator stream messages")
+        XCTAssertEqual(try canonAll(resp), try canonAll(own.toInitiator), "\(name): responder reply messages")
 
         var replica = PeerSyncReplica(node: s.respNode)
         for r in s.resp { replica.insertRaw(r) }
@@ -110,7 +113,7 @@ final class PeerSyncInteropTests: XCTestCase {
         try PeerSyncExchange.respond(input: input, output: out, node: s.respNode, herdrVersion: s.herdr) { _, ops, malformed in
             replica.absorb(ops, malformed: malformed, now: s.now)
         }
-        XCTAssertEqual(out.writtenLines, resp, "\(name): responder output over recorded input")
+        XCTAssertEqual(try canonAll(out.writtenLines), try canonAll(resp), "\(name): responder output over recorded input")
         XCTAssertEqual(canon(replica.sortedRegs()), own.respFinal, "\(name): responder converged state")
 
         var iniReplica = PeerSyncReplica(node: s.iniNode)
@@ -123,4 +126,41 @@ final class PeerSyncInteropTests: XCTestCase {
 
     func testReplaysRustTranscript() throws { try replay("interop-rust.transcript") }
     func testReplaysSwiftTranscript() throws { try replay("interop-swift.transcript") }
+
+    /// Receivers must accept any member order (spec 8.1): a stream with every object's members reversed
+    /// (note canonical() re-sorts, so write the reversed text by hand below) converges identically.
+    func testResponderAcceptsAnyKeyOrder() throws {
+        let sc = try scenario()
+        let base = try run(sc)
+        func reverseText(_ l: String) -> String {
+            // lines here are flat or one-level nested JSON objects with sorted members: split top-level members and reverse them
+            var parts: [String] = [], depth = 0, cur = "", inStr = false, esc = false
+            for ch in l.dropFirst().dropLast() {
+                if inStr { cur.append(ch); if esc { esc = false } else if ch == "\\" { esc = true } else if ch == "\"" { inStr = false }; continue }
+                if ch == "\"" { inStr = true; cur.append(ch) } else if ch == "{" || ch == "[" { depth += 1; cur.append(ch) }
+                else if ch == "}" || ch == "]" { depth -= 1; cur.append(ch) }
+                else if ch == "," && depth == 0 { parts.append(cur); cur = "" } else { cur.append(ch) }
+            }
+            parts.append(cur)
+            return "{" + parts.reversed().joined(separator: ",") + "}"
+        }
+        let shuffled = base.toResponder.map(reverseText)
+        XCTAssertNotEqual(shuffled, base.toResponder, "the reordered stream must actually differ in bytes")
+        var resp = PeerSyncReplica(node: sc.respNode)
+        for r in sc.resp { resp.insertRaw(r) }
+        let out = PeerSyncMemoryChannel()
+        try PeerSyncExchange.respond(input: PeerSyncMemoryChannel(Data(shuffled.map { $0 + "\n" }.joined().utf8)), output: out, node: sc.respNode, herdrVersion: sc.herdr) { _, ops, malformed in
+            resp.absorb(ops, malformed: malformed, now: sc.now)
+        }
+        XCTAssertEqual(canon(resp.sortedRegs()), base.respFinal)
+
+        // and the initiator accepts a reply whose members are reordered
+        let reply = out.writtenLines.map(reverseText)
+        var ini = PeerSyncReplica(node: sc.iniNode)
+        for r in sc.ini { ini.insertRaw(r) }
+        let got = try PeerSyncExchange.initiate(input: PeerSyncMemoryChannel(Data(reply.map { $0 + "\n" }.joined().utf8)), output: PeerSyncMemoryChannel(),
+                                                node: sc.iniNode, herdrVersion: sc.herdr, regs: ini.sortedRegs())
+        for r in got.reply { _ = ini.apply(r, now: sc.now) }
+        XCTAssertEqual(canon(ini.sortedRegs()), base.iniFinal)
+    }
 }
