@@ -220,6 +220,8 @@ final class PeerPairingTests: XCTestCase {
         }
 
         XCTAssertEqual(PeerPairing.configBlock(try code()), """
+            # wooloo-label Work PC
+            # wooloo-session work
             Host wooloo-peer-work-pc
                 HostName mac.ts.net
                 User me
@@ -232,6 +234,8 @@ final class PeerPairingTests: XCTestCase {
 
             """)
         XCTAssertEqual(PeerPairing.configBlock(try code(target: "[fd7a::1]")), """
+            # wooloo-label Work PC
+            # wooloo-session work
             Host wooloo-peer-work-pc
                 HostName fd7a::1
                 IdentityFile ~/.ssh/wooloo_peer_ed25519

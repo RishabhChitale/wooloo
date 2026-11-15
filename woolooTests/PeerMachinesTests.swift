@@ -46,6 +46,38 @@ final class PeerMachinesTests: XCTestCase {
         XCTAssertFalse(other.contains { $0.hasPrefix("wooloo-peer ") })
     }
 
+    func testPeersNeverShareAMultiplexedConnection() {
+        XCTAssertEqual(WorkspaceFiles.sshMultiplexOptions(for: peer), ["-o", "ControlMaster=no", "-o", "ControlPath=none"])
+        for command in ["remote-api-bridge", "remote-client-bridge"] {
+            let args = HerdrRemoteBridge.arguments(peer, command: command)
+            XCTAssertTrue(args.contains("ControlMaster=no"))
+            XCTAssertFalse(args.contains { $0.hasPrefix("ControlPersist") || $0 == "ControlMaster=auto" })
+        }
+        XCTAssertFalse(WorkspaceFiles.sshMultiplexOptions(for: plain).contains("ControlMaster=no"))
+    }
+
+    func testProfilesComeFromPeerConfFiles() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("wooloo-peer-profiles-\(UUID().uuidString)")
+        let directory = PeerPairing.peersDirectory(home: home)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        try "# wooloo-label Work PC\n# wooloo-session work\nHost wooloo-peer-work-pc\n".write(
+            to: directory.appendingPathComponent("work-pc.conf"), atomically: true, encoding: .utf8)
+        try "Host wooloo-peer-old\n".write(to: directory.appendingPathComponent("old.conf"), atomically: true, encoding: .utf8)
+        try "x".write(to: directory.appendingPathComponent("Bad Name.conf"), atomically: true, encoding: .utf8)
+        try "x".write(to: directory.appendingPathComponent("work-pc.known_hosts"), atomically: true, encoding: .utf8)
+        let profiles = PeerMachine.profiles(home: home)
+        XCTAssertEqual(profiles.map(\.id), ["wooloo-peer-old", "wooloo-peer-work-pc"])
+        XCTAssertEqual(profiles[0].label, "old")
+        XCTAssertEqual(profiles[0].session, "default")
+        XCTAssertEqual(profiles[1].label, "Work PC")
+        XCTAssertEqual(profiles[1].session, "work")
+        XCTAssertEqual(profiles[1].target, "wooloo-peer-work-pc")
+        XCTAssertTrue(profiles.allSatisfy(PeerMachine.isPeer))
+        let bad = PeerMachine.profile(id: "x", conf: "# wooloo-session bad.session\n")
+        XCTAssertEqual(bad.session, "default")
+    }
+
     @MainActor
     func testMonitorConnectsFailsAndBacksOff() async {
         let replies = ReplyQueue(["wooloo-peer-bridge-v1 0.9.7", "FAIL", "FAIL", "FAIL"])
