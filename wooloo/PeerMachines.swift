@@ -63,7 +63,8 @@ enum PeerMachine {
     static func helloArguments(_ machine: HerdrMachineProfile) -> [String] {
         let endpoint = WorkspaceFiles.SSHEndpoint(machine.target)
         var args = ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-                    "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=2"]
+                    "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=2",
+                    "-o", "ControlMaster=no", "-o", "ControlPath=none"]
         if let port = endpoint.port { args += ["-p", port] }
         return args + [endpoint.destination, helloCommand]
     }

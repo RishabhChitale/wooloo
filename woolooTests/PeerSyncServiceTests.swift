@@ -98,6 +98,8 @@ final class PeerSyncServiceTests: XCTestCase {
         let args = PeerSyncService.syncArguments(machine)
         XCTAssertEqual(args.last, "wooloo-peer sync")
         XCTAssertTrue(args.contains("BatchMode=yes"))
+        XCTAssertTrue(args.contains("ControlMaster=no"))
+        XCTAssertTrue(args.contains("ControlPath=none"))
     }
 
     func testStatusLabels() {
