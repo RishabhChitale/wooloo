@@ -1,0 +1,9 @@
+> {"herdr_version":"0.5.0","node":"mac-3f9a21c0","proto":1,"t":"hello"}
+> {"field":"name","hlc":{"counter":0,"wall":1763112000100},"key":"space:0b8d3e94-5a17-4c2f-8e60-7d1a9b3c4f22","node":"mac-3f9a21c0","t":"op","value":"Scratch"}
+> {"field":"category","hlc":{"counter":0,"wall":1763112000600},"key":"space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11","node":"mac-3f9a21c0","t":"op","value":"school"}
+> {"field":"name","hlc":{"counter":1,"wall":1763112000500},"key":"space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11","node":"mac-3f9a21c0","t":"op","value":"Study Central"}
+> {"t":"end","count":3}
+< {"herdr_version":"0.5.0","node":"win-07be55d1","proto":1,"t":"hello"}
+< {"field":"deleted","hlc":{"counter":0,"wall":1763112000700},"key":"space:0b8d3e94-5a17-4c2f-8e60-7d1a9b3c4f22","node":"win-07be55d1","t":"op","value":true}
+< {"field":"color","hlc":{"counter":0,"wall":1763112000300},"key":"space:6f1c7a52-3b0e-4d8e-9a51-2a8f1c0d9e11","node":"win-07be55d1","t":"op","value":"#112233"}
+< {"t":"end","count":2,"accepted":3,"rejected":0}

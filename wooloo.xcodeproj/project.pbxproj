@@ -116,6 +116,7 @@
 		C3D000000000000000000103 /* PeerPairingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D100000000000000000103 /* PeerPairingTests.swift */; };
 		C3D000000000000000000104 /* PeerMachinesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D100000000000000000104 /* PeerMachinesTests.swift */; };
 		C3D000000000000000000105 /* PeerSyncServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D100000000000000000105 /* PeerSyncServiceTests.swift */; };
+		C3D000000000000000000106 /* PeerSyncInteropTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D100000000000000000106 /* PeerSyncInteropTests.swift */; };
 		8DFA5B3024E947D299999C0F /* IntegratedWindowChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA8DB6C03C54F27BDBFE67F /* IntegratedWindowChromeTests.swift */; };
 		C30000000000000000000064 /* ContentCommandsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000065 /* ContentCommandsTests.swift */; };
 		C30000000000000000000068 /* WorkspaceExplorerModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000069 /* WorkspaceExplorerModelTests.swift */; };
@@ -305,6 +306,7 @@
 		C3D100000000000000000103 /* PeerPairingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerPairingTests.swift; sourceTree = "<group>"; };
 		C3D100000000000000000104 /* PeerMachinesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerMachinesTests.swift; sourceTree = "<group>"; };
 		C3D100000000000000000105 /* PeerSyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerSyncServiceTests.swift; sourceTree = "<group>"; };
+		C3D100000000000000000106 /* PeerSyncInteropTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerSyncInteropTests.swift; sourceTree = "<group>"; };
 		DBA8DB6C03C54F27BDBFE67F /* IntegratedWindowChromeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegratedWindowChromeTests.swift; sourceTree = "<group>"; };
 		C30000000000000000000065 /* ContentCommandsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentCommandsTests.swift; sourceTree = "<group>"; };
 		C30000000000000000000069 /* WorkspaceExplorerModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceExplorerModelTests.swift; sourceTree = "<group>"; };
@@ -531,6 +533,7 @@
 				C3D100000000000000000103 /* PeerPairingTests.swift */,
 				C3D100000000000000000104 /* PeerMachinesTests.swift */,
 				C3D100000000000000000105 /* PeerSyncServiceTests.swift */,
+				C3D100000000000000000106 /* PeerSyncInteropTests.swift */,
 				C30000000000000000000F06 /* AgentQuotaTests.swift */,
 				D50000000000000000000008 /* PeerSyncTests.swift */,
 				C30000000000000000000F0A /* QuickOpenTests.swift */,
@@ -840,6 +843,7 @@
 				C3D000000000000000000103 /* PeerPairingTests.swift in Sources */,
 				C3D000000000000000000104 /* PeerMachinesTests.swift in Sources */,
 				C3D000000000000000000105 /* PeerSyncServiceTests.swift in Sources */,
+				C3D000000000000000000106 /* PeerSyncInteropTests.swift in Sources */,
 				C30000000000000000000F05 /* AgentQuotaTests.swift in Sources */,
 				D50000000000000000000007 /* PeerSyncTests.swift in Sources */,
 				C30000000000000000000F09 /* QuickOpenTests.swift in Sources */,
