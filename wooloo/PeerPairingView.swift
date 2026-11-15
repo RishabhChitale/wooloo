@@ -50,6 +50,18 @@ struct PeerPairingView: View {
             GroupBox("Other computer") {
                 VStack(alignment: .leading, spacing: 8) {
                     TextEditor(text: $pasted).font(.caption.monospaced()).frame(height: 60)
+                        .accessibilityLabel("Paste the other device's code here")
+                        .overlay(alignment: .topLeading) {
+                            if pasted.isEmpty {
+                                Text("Paste the other device's code here")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.top, 8)
+                                    .padding(.leading, 6)
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                     if let code = peerCode {
                         Text("\(code.label) · \(code.target) · session \(code.session) · Herdr \(code.herdrVersion)")
                             .textSelection(.enabled)
