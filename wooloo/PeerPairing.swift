@@ -459,16 +459,17 @@ enum PeerPairing {
                 exec "$peer_herdr" status server --json;;
             wooloo-sync)
                 # Metadata sync responder (docs/sync-protocol.md): no arguments, runs nothing from the
-                # request. Input is capped before wooloo-sync sees it: the stream by head, then each
-                # line and the total by awk; over a cap awk stops, wooloo-sync sees EOF and commits nothing.
+                # request. awk caps each line and the whole stream before wooloo-sync sees it and
+                # flushes every line, since the exchange is ping-pong over one open stream; over a cap
+                # awk stops, wooloo-sync sees EOF and commits nothing.
                 peer_sync=$HOME/.local/bin/wooloo-sync
                 [ -x "$peer_sync" ] || peer_sync=$(command -v wooloo-sync 2>/dev/null) || peer_sync=
                 { [ -n "$peer_sync" ] && [ -x "$peer_sync" ]; } || peer_fail 'wooloo-sync not found'
-                head -c 33554433 | awk -v line_max=1048576 -v total_max=33554432 '
+                awk -v line_max=1048576 -v total_max=33554432 '
                     { total += length($0) + 1
                       if (length($0) > line_max || total > total_max) {
                           print "wooloo-peer-bridge: sync input over the size limit" > "/dev/stderr"; exit 65 }
-                      print }' | "$peer_sync" exchange
+                      print; fflush() }' | "$peer_sync" exchange
                 exit $?;;
             *) peer_fail 'unsupported request';;
         esac

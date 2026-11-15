@@ -557,6 +557,46 @@ final class PeerPairingTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
     }
 
+    func testSyncDeliversEachLineWhileTheStreamStaysOpen() throws {
+        // The exchange is ping-pong over one stream: a line must reach wooloo-sync before EOF.
+        try makeFakeHerdr()
+        let bin = directory.appendingPathComponent(".local/bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let sync = bin.appendingPathComponent("wooloo-sync")
+        try Data("#!/bin/sh\nwhile IFS= read -r line; do printf 'reply:%s\\n' \"$line\"; done\n".utf8).write(to: sync)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sync.path)
+        try PeerPairing.installDispatcher(home: directory, herdr: fakeHerdrPath, version: "0.9.5")
+
+        signal(SIGPIPE, SIG_IGN)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [PeerPairing.dispatcherURL(home: directory).path, "--peer", "p"]
+        process.environment = ["HOME": directory.path, "PATH": "/usr/bin:/bin", "SSH_ORIGINAL_COMMAND": "wooloo-peer sync"]
+        let stdin = Pipe()
+        let out = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        defer { if process.isRunning { process.terminate() } }
+
+        for index in 0..<3 {
+            try stdin.fileHandleForWriting.write(contentsOf: Data("op\(index)\n".utf8))
+            let reply = DispatchSemaphore(value: 0)
+            let box = SyncReplyBox()
+            let reader = out.fileHandleForReading
+            DispatchQueue.global().async {
+                box.data = reader.availableData
+                reply.signal()
+            }
+            XCTAssertEqual(reply.wait(timeout: .now() + 5), .success, "line \(index) was held until EOF")
+            XCTAssertEqual(String(decoding: box.data, as: UTF8.self), "reply:op\(index)\n")
+        }
+        try stdin.fileHandleForWriting.close()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+    }
+
     func testSyncWithoutTheBinaryFailsCleanly() throws {
         try makeFakeHerdr()
         let run = try runDispatcher("wooloo-peer sync", input: Data("x\n".utf8))
@@ -623,4 +663,9 @@ final class PeerPairingTests: XCTestCase {
         let ended = try runProcess("/usr/bin/true", [])
         XCTAssertFalse(PeerPresence.isBridge(ended.pid, modified: .distantPast))
     }
+}
+
+/// Carries one read result off a background queue; the semaphore orders the write before the read.
+private final class SyncReplyBox: @unchecked Sendable {
+    var data = Data()
 }

@@ -102,12 +102,15 @@ runs a fixed command itself. A request that matches no template exits 64 with
 ### Sync cap
 
 `wooloo-peer sync` runs `~/.local/bin/wooloo-sync exchange` (else `wooloo-sync` on `PATH`, else
-`wooloo-sync not found`). Its stdin is the SSH stream, passed through
-`head -c 33554433 | awk` with `LC_ALL=C`:
+`wooloo-sync not found`). Its stdin is the SSH stream, passed through one `awk` with `LC_ALL=C`
+that flushes after every line, because the exchange is ping-pong over one open stream (a buffering
+stage such as BSD `head -c` would hold the initiator's lines until EOF and deadlock it):
 
 - a line longer than 1 MiB (1,048,576 bytes) or a total over 32 MiB (33,554,432 bytes) stops the
   stream: awk prints `wooloo-peer-bridge: sync input over the size limit` to stderr and exits 65;
   lines already passed stay delivered;
+- the caps apply to complete lines, so a peer that sends a huge line without a newline makes awk
+  hold it in memory until the connection ends (sshd's own limits and the disconnect bound it);
 - input is only ever data on a pipe: it is never expanded or evaluated by the shell;
 - the pipeline's exit status is `wooloo-sync`'s, which is 0 when it simply sees EOF after the cut,
   so the stderr message (not the status) tells a client the cap was hit.
@@ -125,16 +128,14 @@ the `sysctl` process name), and shows "Attached: <peers>" on that local session'
 
 ## Caveats
 
-- The forced command blocks everything except bridges, so for a paired peer key these do not work:
-  `herdr --machine`, `herdr machine add`'s preparation, Herdr install/live handoff, wooloo's
+- The forced command allows only the entries above, so for a paired peer key these do not work:
+  `herdr --machine` commands other than bridges, Herdr install/live handoff, wooloo's
   `remoteSnapshot`, `HerdrRemoteConfig`, `WorkspaceFiles` git/file/HostStats over SSH and the
   `MobileSSHAccess` identity probe.
-- Herdr's preparation probes (`/bin/sh -s` with `uname -s`/`uname -m`, `command -v herdr`, the
-  candidate script, `test -x … status client --json`) are refused. So `herdr machine add` and a
-  saved-profile connect fail against a bridge-only peer. In the Mac→PC direction, step 5 works only
-  if the PC's entry for this Mac's key is unrestricted or the Windows dispatcher answers those
-  probes; the PC→Mac client must use the `wooloo-peer api|client|check S` forms or Herdr's bridge
-  script line.
+- Herdr's preparation probes (`uname`, path probe, candidates, `test -x`, status, session list)
+  are allow-listed, so stock `herdr machine add` and saved profiles should work against a
+  bridge-only peer as long as Herdr 0.9.5's request strings are unchanged; a newer Herdr that
+  changes them is refused until the allow-list is updated on both sides.
 - A key already present in `authorized_keys` keeps its existing (possibly unrestricted) entry.
 - Herdr paths with spaces or other characters outside `[A-Za-z0-9._/-]` are refused, as are home
   directories outside that set (the forced command would need quoting sshd does not apply).
@@ -153,15 +154,15 @@ the `sysctl` process name), and shows "Attached: <peers>" on that local session'
   other paths, explicit `--session default`, trailing newline, unknown `/bin/sh -s` scripts, an
   empty or oversized request; all exit 64), peer-name and forced-command errors, a missing Herdr.
 - Sync: pass-through, a 1 MiB line passes and 1 MiB + 1 is cut, the 32 MiB stream cap, hostile
-  text echoed as data, a missing binary.
+  text echoed as data, lines delivered one at a time while stdin stays open, a missing binary.
 - `PeerAllowList.entries` equals `docs/peer-allowlist.json`; presence files for bridges only.
 
 ## Unverified
 
-- The Swift has not been compiled (only CI can build it).
+- The dispatcher has been run by `/bin/sh` locally and in CI, not yet behind a real sshd.
 - sshd's `SSH_ORIGINAL_COMMAND` with Herdr's multi-line bridge scripts, and whether `restrict`
   (no PTY) disturbs the bridges, have only been tested by running the dispatcher directly.
 - Herdr's request strings are from 0.9.5 and may change.
-- `herdr machine add`/connect against a bridge-only peer (expected to fail, see Caveats).
+- `herdr machine add`/connect against a real bridge-only peer.
 - Whether Herdr's own `ssh` calls pick up `~/.ssh/config`'s `Include` (they would not with `-F`).
 - The Windows dispatcher; pid reuse between scans.
