@@ -93,6 +93,7 @@ struct HerdrConnectionsView: View {
                                 .font(.caption)
                             if let machine = connection.machine, PeerMachine.isPeer(machine) {
                                 PeerLinkRow(machine: machine)
+                                PeerSyncRow(machine: machine)
                             }
                             if connection.machine == nil, let peers = presence[connection.session], !peers.isEmpty {
                                 Text("Attached: " + peers.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
