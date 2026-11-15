@@ -18,10 +18,17 @@ jobs:
           path: wooloo-win
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal
+      - name: Install Herdr
+        run: |
+          curl -fsSL https://herdr.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/herdr" --version
       - name: Build wooloo-sync
         working-directory: wooloo-win
         run: cargo build -p wooloo-sync --release
       - name: Private sshd integration test
         env:
           WOOLOO_SYNC_BIN: ${{ github.workspace }}/wooloo-win/target/release/wooloo-sync
-        run: scripts/peer-sshd-integration.sh
+        run: |
+          export HERDR_BIN="$(command -v herdr)"
+          scripts/peer-sshd-integration.sh
