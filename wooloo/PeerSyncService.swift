@@ -11,7 +11,16 @@ final class PeerSyncPipeInput: PeerSyncInput {
     private let handle: FileHandle
     init(_ handle: FileHandle) { self.handle = handle }
     func readChunk(max: Int) throws -> Data {
-        do { return try handle.read(upToCount: max) ?? Data() } catch { throw PeerSyncError.io("\(error)") }
+        // read(upToCount:) on a pipe waits for `max` bytes or end of stream, which deadlocks a ping-pong exchange
+        // (the peer's short hello is never delivered). POSIX read returns what has arrived.
+        var buf = [UInt8](repeating: 0, count: max)
+        while true {
+            let n = buf.withUnsafeMutableBytes { Darwin.read(handle.fileDescriptor, $0.baseAddress, max) }
+            if n > 0 { return Data(buf[0..<n]) }
+            if n == 0 { return Data() }
+            if errno == EINTR { continue }
+            throw PeerSyncError.io("read failed: errno \(errno)")
+        }
     }
 }
 

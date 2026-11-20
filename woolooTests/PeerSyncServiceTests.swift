@@ -5,6 +5,20 @@ import XCTest
 final class PeerSyncServiceTests: XCTestCase {
     private var dirs: [URL] = []
 
+    /// A short message must be returned while the writer keeps the pipe open (read(upToCount:) would block to EOF).
+    func testPipeInputReturnsShortMessageBeforeEOF() throws {
+        let pipe = Pipe()
+        let input = PeerSyncPipeInput(pipe.fileHandleForReading)
+        try pipe.fileHandleForWriting.write(contentsOf: Data("{\"t\":\"hello\"}\n".utf8))
+        let got = DispatchSemaphore(value: 0)
+        var chunk = Data()
+        DispatchQueue.global().async { chunk = (try? input.readChunk(max: 64 * 1024)) ?? Data(); got.signal() }
+        XCTAssertEqual(got.wait(timeout: .now() + 5), .success, "readChunk blocked until EOF")
+        XCTAssertEqual(String(decoding: chunk, as: UTF8.self), "{\"t\":\"hello\"}\n")
+        try pipe.fileHandleForWriting.close()
+        XCTAssertEqual(try input.readChunk(max: 16), Data(), "EOF is an empty chunk")
+    }
+
     override func tearDown() {
         dirs.forEach { try? FileManager.default.removeItem(at: $0) }
         dirs = []
