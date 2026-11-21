@@ -5,6 +5,22 @@ import XCTest
 final class PeerSyncServiceTests: XCTestCase {
     private var dirs: [URL] = []
 
+    /// The loop must keep exchanging on its timer (the wait helper once hung after the first exchange).
+    @MainActor func testLoopRepeatsOnItsTimer() async throws {
+        let count = NSLock(); var n = 0
+        let machine = HerdrMachineProfile(id: "box", label: "Box", target: "user@box.test", session: "default", enabled: true)
+        let service = PeerSyncService(machine: machine, engine: try engine("mac-aaaaaaaa"), interval: 0.01,
+                                      transport: { _, _ in count.lock(); n += 1; count.unlock()
+                                          return PeerSyncExchangeResult(peerNode: "win-bbbbbbbb", received: 0, accepted: 0, rejected: 0) },
+                                      sleep: { _ in try? await Task.sleep(nanoseconds: 20_000_000) })
+        service.start()
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline { count.lock(); let k = n; count.unlock(); if k >= 3 { break }; try await Task.sleep(nanoseconds: 50_000_000) }
+        service.stop()
+        count.lock(); let total = n; count.unlock()
+        XCTAssertGreaterThanOrEqual(total, 3, "sync loop stalled after \(total) exchange(s)")
+    }
+
     /// A short message must be returned while the writer keeps the pipe open (read(upToCount:) would block to EOF).
     func testPipeInputReturnsShortMessageBeforeEOF() throws {
         let pipe = Pipe()

@@ -227,7 +227,12 @@ final class PeerSyncService: ObservableObject, PeerSpaceMetadataProviding {
 
     private func waitForWakeOrTimer(_ delay: TimeInterval) async {
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { [sleep] in await sleep(delay) }
+            // The wake child parks on a continuation, which cancellation cannot end: the timer must resume it, or the
+            // group never finishes and the loop stalls after the first exchange.
+            group.addTask { @MainActor [weak self, sleep] in
+                await sleep(delay)
+                self?.wake?.resume(); self?.wake = nil
+            }
             group.addTask { @MainActor [weak self] in
                 await withCheckedContinuation { c in self?.wake = c }
             }
