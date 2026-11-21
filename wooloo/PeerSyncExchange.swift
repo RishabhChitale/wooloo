@@ -197,12 +197,15 @@ enum PeerSyncExchange {
         let r = PeerSyncLineReader(input)
         try writeMessage(output, hello(node, herdrVersion: herdrVersion), sorted: true)
         try flush(output)
+        PeerSyncLog.write("initiate: hello sent")
         let peerHello = try checkHello(try r.readMessage(), own: node)
+        PeerSyncLog.write("initiate: hello received")
         let peer = peerHello.node
         if regs.count > PeerSyncWire.maxOps { throw PeerSyncError.invalid("too many registers") }
         try sendOps(output, regs)
         try writeMessage(output, endMessage(count: regs.count))
         try flush(output)
+        PeerSyncLog.write("initiate: sent \(regs.count) ops and end")
 
         var reply: [PeerSyncRegister] = []
         var malformed: UInt64 = 0

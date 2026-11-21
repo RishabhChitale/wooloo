@@ -7,6 +7,22 @@ import SwiftUI
 // loop (timer, on-change, backoff) and the status shown on the Connections row.
 
 /// Blocking pipe ends used for both the ssh child process and the in-process test peer.
+/// Plain-text step log for diagnosing stuck exchanges: ~/Library/Logs/wooloo-peer-sync.log (no message contents).
+enum PeerSyncLog {
+    private static let lock = NSLock()
+    static func write(_ text: String) {
+        lock.lock(); defer { lock.unlock() }
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/wooloo-peer-sync.log")
+        let line = "\(ISO8601DateFormatter().string(from: Date())) \(text)\n"
+        if let h = try? FileHandle(forWritingTo: url) {
+            defer { try? h.close() }
+            if (try? h.seekToEnd()) != nil { try? h.write(contentsOf: Data(line.utf8)) }
+        } else {
+            try? Data(line.utf8).write(to: url)
+        }
+    }
+}
+
 final class PeerSyncPipeInput: PeerSyncInput {
     private let handle: FileHandle
     init(_ handle: FileHandle) { self.handle = handle }
@@ -16,8 +32,8 @@ final class PeerSyncPipeInput: PeerSyncInput {
         var buf = [UInt8](repeating: 0, count: max)
         while true {
             let n = buf.withUnsafeMutableBytes { Darwin.read(handle.fileDescriptor, $0.baseAddress, max) }
-            if n > 0 { return Data(buf[0..<n]) }
-            if n == 0 { return Data() }
+            if n > 0 { PeerSyncLog.write("read \(n) bytes"); return Data(buf[0..<n]) }
+            if n == 0 { PeerSyncLog.write("read EOF"); return Data() }
             if errno == EINTR { continue }
             throw PeerSyncError.io("read failed: errno \(errno)")
         }
@@ -225,9 +241,11 @@ final class PeerSyncService: ObservableObject, PeerSpaceMetadataProviding {
     @discardableResult
     func syncNow() async -> TimeInterval {
         status = .syncing
+        PeerSyncLog.write("syncNow begin")
         let machine = machine, engine = engine, transport = transport
         do {
-            let outcome = try await BlockingWork.run(priority: .utility) { try transport(machine, engine) }
+            let outcome = try await BlockingWork.run(priority: .utility) { PeerSyncLog.write("transport start"); return try transport(machine, engine) }
+            PeerSyncLog.write("syncNow ok received=\(outcome.received)")
             peerNode = outcome.peerNode
             delivered = engine.latestLocalClock()
             replica = engine.snapshot()
@@ -238,6 +256,7 @@ final class PeerSyncService: ObservableObject, PeerSpaceMetadataProviding {
             return interval
         } catch {
             let pending = engine.pendingCount(since: delivered)
+            PeerSyncLog.write("syncNow failed: \(error)")
             status = .offline(pending: pending, reason: "\(error)")
             let delay = backoff.delay
             backoff.failed()
@@ -326,6 +345,7 @@ final class PeerSyncService: ObservableObject, PeerSpaceMetadataProviding {
         process.standardOutput = fromChild
         process.standardError = FileHandle.nullDevice
         do { try process.run() } catch { throw PeerSyncError.io("ssh failed to start: \(error)") }
+        PeerSyncLog.write("ssh pid \(process.processIdentifier)")
         let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 90, execute: watchdog)
         defer {
