@@ -235,10 +235,12 @@ final class HerdrDestinations: ObservableObject {
                 if let profiles { applyCatalog(profiles) }
             }
         }
+        PeerSyncCoordinator.shared.begin()
         for store in stores {
             attachMetadata(store)
             observe(store)
             store.start()
+            PeerSyncCoordinator.shared.attach(localStore: store)
         }
         active.setPresentationActive(isActiveDestinationOpen)
         notifier.register(windowID, window: { [weak self] in self?.nativeWindow },

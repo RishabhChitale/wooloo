@@ -394,19 +394,51 @@ struct PeerSyncRow: View {
                 if let localStore { service.observe(localStore) }
                 service.start()
             }
-            .onDisappear { holder.current?.stop() }
+    }
+}
+
+/// App-lifetime owner of one sync service per peer machine, so sync runs whether or not the Connections panel is open.
+@MainActor
+final class PeerSyncCoordinator {
+    static let shared = PeerSyncCoordinator()
+    private var services: [HerdrMachineProfile: PeerSyncService] = [:]
+    private var localStore: HerdrStore?
+    private var subscription: AnyCancellable?
+
+    /// Follows the shared machine list; starts a service for each enabled peer and stops ones that went away.
+    func begin(pool: HerdrMetadataPool = .shared) {
+        guard subscription == nil else { return }
+        subscription = pool.profiles.sink { [weak self] profiles in
+            Task { @MainActor in self?.apply(profiles ?? []) }
+        }
+    }
+
+    func attach(localStore store: HerdrStore) {
+        guard store.machine == nil else { return }
+        localStore = store
+        for service in services.values { service.observe(store) }
+    }
+
+    func service(for machine: HerdrMachineProfile) -> PeerSyncService {
+        if let existing = services[machine] { return existing }
+        let made = PeerSyncService(machine: machine)
+        if let localStore { made.observe(localStore) }
+        services[machine] = made
+        return made
+    }
+
+    private func apply(_ profiles: [HerdrMachineProfile]) {
+        let wanted = profiles.filter { $0.enabled && PeerMachine.isPeer($0) }
+        for machine in wanted { service(for: machine).start() }
+        for (machine, service) in services where !wanted.contains(machine) {
+            service.stop(); services[machine] = nil
+        }
     }
 }
 
 @MainActor
 final class PeerSyncHolder: ObservableObject {
-    private(set) var current: PeerSyncService?
-
     func service(for machine: HerdrMachineProfile) -> PeerSyncService {
-        if let current, current.machine == machine { return current }
-        current?.stop()
-        let made = PeerSyncService(machine: machine)
-        current = made
-        return made
+        PeerSyncCoordinator.shared.service(for: machine)
     }
 }
