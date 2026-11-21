@@ -421,7 +421,36 @@ final class HerdrDestinations: ObservableObject {
         open(HerdrWindowConnection(session: name))
     }
 
+    /// New Spaces go to the Windows PC's Herdr app by default (helper script over the peer bridge);
+    /// it falls back to a local Space when the helper is missing or the PC is unreachable.
+    /// `defaults write wooloo newSpacesOnPC -bool NO` turns it off. Spaces made for a Mac folder stay local.
+    static var newSpacesOnPC: Bool { UserDefaults.standard.object(forKey: "newSpacesOnPC") as? Bool ?? true }
+    private static let newSpaceOnPCScript = NSString(string: "~/.local/bin/new-space-on-pc").expandingTildeInPath
+
     func createSpace(on store: HerdrStore, cwd: String? = nil, label: String? = nil) {
+        guard stores.contains(where: { $0 === store }), store.destinationEnabled else { return }
+        guard cwd == nil, Self.newSpacesOnPC, FileManager.default.isExecutableFile(atPath: Self.newSpaceOnPCScript) else {
+            createLocalSpace(on: store, cwd: cwd, label: label)
+            return
+        }
+        let script = Self.newSpaceOnPCScript
+        DispatchQueue.global(qos: .userInitiated).async { [weak self, weak store] in
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: script)
+            task.arguments = label.map { [$0] } ?? []
+            task.standardOutput = FileHandle.nullDevice
+            task.standardError = FileHandle.nullDevice
+            var ok = false
+            do { try task.run(); task.waitUntilExit(); ok = task.terminationStatus == 0 } catch { ok = false }
+            guard !ok else { return }
+            DispatchQueue.main.async {
+                guard let self, let store else { return }
+                self.createLocalSpace(on: store, cwd: cwd, label: label)
+            }
+        }
+    }
+
+    private func createLocalSpace(on store: HerdrStore, cwd: String? = nil, label: String? = nil) {
         guard stores.contains(where: { $0 === store }), store.destinationEnabled else { return }
         let intent = navigation
         let previousContext = (active.contextID, active.selectedWorkspaceID, active.selectedTabID, active.selectedPaneID)
