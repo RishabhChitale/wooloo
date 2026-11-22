@@ -1111,6 +1111,18 @@ final class CompanionTests: XCTestCase {
         XCTAssertTrue(CompanionMoodState.isDue(key: "working", lastKey: "idle", lastWrite: t, now: t.addingTimeInterval(1)))
     }
 
+    func testNudgeLoveClauseFollowsTheLoveBar() {
+        let low = CompanionNudge.loveClause(hearts: 5, pick: { _ in 0 })
+        XCTAssertTrue(low.hasPrefix("love bar: 5% (starved for attention); ask P-chan to cheer you up"), low)
+        XCTAssertTrue(CompanionNudge.loveClause(hearts: 40, pick: { _ in 1 }).contains("quality time"))
+        XCTAssertTrue(CompanionNudge.loveClause(hearts: 100, pick: { _ in 0 }).contains("overflowing with love"))
+        XCTAssertTrue(CompanionNudge.loveClause(hearts: .nan, pick: { _ in 99 }).hasPrefix("love bar: 0%"))
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let plain = CompanionNudge.text(now: date, hint: "everything is quiet")
+        let loved = CompanionNudge.text(now: date, hint: "everything is quiet", hearts: 5, pick: { _ in 0 })
+        XCTAssertTrue(loved.hasPrefix(plain + "; love bar: 5%"))
+    }
+
     func testAnimFileHoldsTheClipInPlay() throws {
         let sequence = CompanionSequence(dir: "skins/ame/tweet/0", frames: 6, fps: 4, loop: true, style: "gesture")
         let start = Date(timeIntervalSince1970: 1_800_000_000)

@@ -1656,7 +1656,7 @@ final class CompanionModel: ObservableObject {
         let hint = CompanionNudge.hint(commanderWorking: CompanionMood(agentStatus: commanderStatus) == .working,
                                        runningTasks: 0)
         guard let params = CompanionMessage.promptParams(paneID: ame.paneID, text: CompanionNudge.text(now: now, mood: mood, doing: ambientKey.flatMap(CompanionNudge.doingPhrase(forAmbientKey:)),
-                                                                  hint: hint))
+                                                                  hint: hint, hearts: hearts?.level))
         else { return }
         Task { try? await store.sendAgentPrompt(params) }
     }
@@ -2412,16 +2412,48 @@ enum CompanionNudge {
         ][key.lowercased()]
     }
 
+    /// What her love bar level makes her want to say, as an instruction clause: an empty bar asks to be cheered up,
+    /// praised or spent time with; a full one is overflowing and affectionate. One of a few asks is picked per band.
+    static func loveClause(hearts: Double, pick: (Int) -> Int = { Int.random(in: 0..<$0) }) -> String {
+        let level = Int(min(max(hearts.isFinite ? hearts : 0, 0), 100).rounded())
+        let asks: [String]
+        let feeling: String
+        switch level {
+        case ..<15:
+            feeling = "starved for attention"
+            asks = ["ask P-chan to cheer you up", "fish for praise, you need to hear you did well",
+                    "ask for quality time, you just want P-chan to stay and talk", "ask for headpats and some comfort"]
+        case ..<35:
+            feeling = "a little neglected"
+            asks = ["ask for a compliment", "ask P-chan to hang out with you for a bit",
+                    "ask if you can have a cozy break together", "fish for some praise"]
+        case ..<60:
+            feeling = "okay"
+            asks = ["make a small bid for attention, ask what P-chan is up to", "invite P-chan to spend a little quality time",
+                    "ask for a tiny bit of praise for something you did"]
+        case ..<85:
+            feeling = "happy and playful"
+            asks = ["tease P-chan lovingly", "share something silly about your day", "ask what P-chan wants to do together later"]
+        default:
+            feeling = "overflowing with love"
+            asks = ["praise P-chan and say thanks", "be extra affectionate and cheer P-chan on", "suggest something sweet to do together"]
+        }
+        return "love bar: \(level)% (\(feeling)); \(asks[min(max(pick(asks.count), 0), asks.count - 1)])"
+    }
+
     /// "[nudge] it's Sunday 2:40 AM; mood: lonely; doing: reading comics; the commander is working"
-    static func text(now: Date, mood: String = "idle", doing: String? = nil, hint: String,
-                     calendar: Calendar = .current) -> String {
+    /// With `hearts`, a love-bar clause is added: "...; love bar: 12% (starved for attention); ask P-chan to cheer you up".
+    static func text(now: Date, mood: String = "idle", doing: String? = nil, hint: String, hearts: Double? = nil,
+                     pick: (Int) -> Int = { Int.random(in: 0..<$0) }, calendar: Calendar = .current) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "EEEE h:mm a"
-        return "\(prefix) it's \(formatter.string(from: now)); mood: \(moodWord(mood)); "
+        let base = "\(prefix) it's \(formatter.string(from: now)); mood: \(moodWord(mood)); "
             + "doing: \(doing ?? "just hanging out"); \(hint)"
+        guard let hearts else { return base }
+        return base + "; " + loveClause(hearts: hearts, pick: pick)
     }
 }
 
