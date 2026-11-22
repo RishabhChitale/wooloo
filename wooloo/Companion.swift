@@ -1296,6 +1296,7 @@ final class CompanionModel: ObservableObject {
                                          isLoaded: { [fully = loadedFully] in fully.contains($0.dir) })
         if changedPlayer || next.upcoming != player.upcoming { player = next }
         if next.sequence != before { sequenceChangedAt = now }
+        publishAnim(next.sequence, start: next.sequenceStart, key: key, now: now)
         if let sequence = next.sequence { ensureLoaded(sequence) }
         if let upcoming = next.upcoming { ensureLoaded(upcoming) }
         // Only the sequence in play and the next variant stay decoded.
@@ -1321,6 +1322,23 @@ final class CompanionModel: ObservableObject {
         publishedAt = now
         let data = CompanionMoodState.payload(mood: key, skin: skin, time: now)
         let url = CompanionMoodState.fileURL(companionDirectory: directory)
+        let writer = stateWriter
+        Task.detached(priority: .utility) { await writer.write(data, to: url) }
+    }
+
+    private var publishedAnimID: String?
+    private var publishedAnimAt: Date?
+
+    /// Writes `state/anim.json` (the clip in play: its folder, frame count, speed and start time) when a new clip
+    /// starts and every 30 s otherwise, so the Windows Herdr app's Ame window can play the same one in step.
+    private func publishAnim(_ sequence: CompanionSequence?, start: Date, key: String, now: Date) {
+        guard let sequence else { return }
+        let id = CompanionAnimState.identity(sequence: sequence, start: start)
+        guard CompanionMoodState.isDue(key: id, lastKey: publishedAnimID, lastWrite: publishedAnimAt, now: now) else { return }
+        publishedAnimID = id
+        publishedAnimAt = now
+        let data = CompanionAnimState.payload(key: key, sequence: sequence, start: start, time: now)
+        let url = CompanionAnimState.fileURL(companionDirectory: directory)
         let writer = stateWriter
         Task.detached(priority: .utility) { await writer.write(data, to: url) }
     }
@@ -2554,6 +2572,27 @@ enum CompanionMoodState {
     static func isDue(key: String, lastKey: String?, lastWrite: Date?, now: Date) -> Bool {
         guard key == lastKey, let lastWrite else { return true }
         return now.timeIntervalSince(lastWrite) >= heartbeat
+    }
+}
+
+/// `state/anim.json`: the clip in play, next to `mood.json`.
+enum CompanionAnimState {
+    static func identity(sequence: CompanionSequence, start: Date) -> String {
+        "\(sequence.dir)|\(Int(start.timeIntervalSince1970 * 1000))"
+    }
+
+    static func payload(key: String, sequence: CompanionSequence, start: Date, time: Date) -> Data {
+        let object: [String: Any] = [
+            "key": key, "dir": sequence.dir, "frames": sequence.frames, "fps": sequence.fps, "loop": sequence.loop,
+            "style": sequence.style ?? "loop", "start": Int(start.timeIntervalSince1970 * 1000),
+            "t": Int(time.timeIntervalSince1970),
+        ]
+        return (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
+
+    static func fileURL(companionDirectory: URL) -> URL {
+        CompanionMoodState.fileURL(companionDirectory: companionDirectory)
+            .deletingLastPathComponent().appendingPathComponent("anim.json")
     }
 }
 

@@ -1111,6 +1111,20 @@ final class CompanionTests: XCTestCase {
         XCTAssertTrue(CompanionMoodState.isDue(key: "working", lastKey: "idle", lastWrite: t, now: t.addingTimeInterval(1)))
     }
 
+    func testAnimFileHoldsTheClipInPlay() throws {
+        let sequence = CompanionSequence(dir: "skins/ame/tweet/0", frames: 6, fps: 4, loop: true, style: "gesture")
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let data = CompanionAnimState.payload(key: "tweet", sequence: sequence, start: start, time: start.addingTimeInterval(2))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), ["key", "dir", "frames", "fps", "loop", "style", "start", "t"])
+        XCTAssertEqual(object["dir"] as? String, "skins/ame/tweet/0")
+        XCTAssertEqual(object["frames"] as? Int, 6)
+        XCTAssertEqual(object["start"] as? Int, 1_800_000_000_000)
+        XCTAssertEqual(CompanionAnimState.identity(sequence: sequence, start: start), "skins/ame/tweet/0|1800000000000")
+        XCTAssertEqual(CompanionAnimState.fileURL(companionDirectory: URL(fileURLWithPath: "/h/wooloo-companion/ame")).path,
+                       "/h/wooloo-companion/state/anim.json")
+    }
+
     func testBubbleFileHoldsTheLineAndTheTimeNextToTheMoodFile() throws {
         let data = CompanionBubbleState.payload(text: "hehe, chilling~", time: Date(timeIntervalSince1970: 1_800_000_000))
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
