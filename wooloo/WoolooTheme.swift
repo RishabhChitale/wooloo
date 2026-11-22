@@ -33,6 +33,12 @@ struct WoolooTheme: Identifiable, Equatable {
                     background: 0x1E1E2E, foreground: 0xCDD6F4,
                     cursor: 0xF5E0DC, selectionBackground: 0xF5E0DC,
                     ansi: [0x45475A, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xF5C2E7, 0x94E2D5, 0xBAC2DE, 0x585B70, 0xF7AEC2, 0xC2ECBF, 0xFCD682, 0xAECCFC, 0xF398DA, 0xB1EAE1, 0xA6ADC8]),
+        // The Windows Herdr app's Ame theme (layouts/ame.json + themes/ame.json), so both machines share one look.
+        WoolooTheme(id: "ame", name: "Ame", isDark: true,
+                    herdr: .init(accent: 0x9AA5FF, panel: 0x1E1E29, activeRow: 0x3B3E63, selection: 0x4B4F86, surface0: 0x2F3147, surface1: 0x363853, surfaceDim: 0x232431, overlay0: 0x7B7E9C, overlay1: 0x8A8CA8, text: 0xE6E6F5, subtext: 0xAEB1CC, mauve: 0xFF8FC8, green: 0x8FE3B0, yellow: 0xF4B040, red: 0xFF7A93, blue: 0x8FA8FF, teal: 0x8FE3E8, peach: 0xFFB870),
+                    background: 0x232431, foreground: 0xE6E6F5,
+                    cursor: 0xFF8FC8, selectionBackground: 0x4B4F86,
+                    ansi: [0x232431, 0xFF7A93, 0x8FE3B0, 0xF4B040, 0x8FA8FF, 0xFF8FC8, 0x8FE3E8, 0xD8D8EC, 0x4A4C66, 0xFF9DB0, 0xAEF0C8, 0xFFD070, 0xB3C3FF, 0xFFB0DC, 0xB0F0F4, 0xFFFFFF]),
         WoolooTheme(id: "catppuccin-latte", name: "Catppuccin Latte", isDark: false,
                     herdr: .init(accent: 0x1E66F5, panel: 0xEFF1F5, activeRow: 0xE6E9EF, selection: 0xBDD0F5, surface0: 0xCCD0DA, surface1: 0xBCC0CC, surfaceDim: 0xE6E9EF, overlay0: 0x9CA0B0, overlay1: 0x8C8FA1, text: 0x4C4F69, subtext: 0x6C6F85, mauve: 0x8839EF, green: 0x40A02B, yellow: 0xDF8E1D, red: 0xD20F39, blue: 0x1E66F5, teal: 0x179299, peach: 0xFE640B),
                     background: 0xEFF1F5, foreground: 0x4C4F69,
