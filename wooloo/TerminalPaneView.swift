@@ -211,8 +211,14 @@ private struct GridPoint: Comparable {
 /// A small AppKit input surface for Herdr's rendered pane snapshot. Herdr still
 /// owns the PTY; this view only displays its text and forwards keyboard input.
 struct TerminalPaneView: NSViewRepresentable {
-    static let terminalFont = NSFont(name: "FiraCodeNFM-Reg", size: 12)
-        ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+    /// Terminal text size in points. Default 12; the TerminalTextSize preference (8...20) overrides it, read once
+    /// at launch, so a mirrored terminal can be tuned to fit the same number of columns as its host.
+    static let terminalFontSize: CGFloat = {
+        let v = UserDefaults.standard.double(forKey: "TerminalTextSize")
+        return (8.0...20.0).contains(v) ? CGFloat(v) : 12
+    }()
+    static let terminalFont = NSFont(name: "FiraCodeNFM-Reg", size: terminalFontSize)
+        ?? NSFont.monospacedSystemFont(ofSize: terminalFontSize, weight: .regular)
     static let cellWidth = ("M" as NSString).size(withAttributes: [.font: terminalFont]).width
     static let cellHeight = NSLayoutManager().defaultLineHeight(for: terminalFont)
     static let boldFont = NSFontManager.shared.convert(terminalFont, toHaveTrait: .boldFontMask)
