@@ -1111,6 +1111,16 @@ final class CompanionTests: XCTestCase {
         XCTAssertTrue(CompanionMoodState.isDue(key: "working", lastKey: "idle", lastWrite: t, now: t.addingTimeInterval(1)))
     }
 
+    func testBubbleFileHoldsTheLineAndTheTimeNextToTheMoodFile() throws {
+        let data = CompanionBubbleState.payload(text: "hehe, chilling~", time: Date(timeIntervalSince1970: 1_800_000_000))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), ["text", "t"])
+        XCTAssertEqual(object["text"] as? String, "hehe, chilling~")
+        XCTAssertEqual(object["t"] as? Int, 1_800_000_000)
+        XCTAssertEqual(CompanionBubbleState.fileURL(companionDirectory: URL(fileURLWithPath: "/h/wooloo-companion/ame")).path,
+                       "/h/wooloo-companion/state/bubble.json")
+    }
+
     // MARK: Animation polish
 
     private func timeline(_ style: CompanionClipStyle, frames: Int = 4, fps: Double = 4, seed: UInt64 = 7) -> CompanionClipTimeline {

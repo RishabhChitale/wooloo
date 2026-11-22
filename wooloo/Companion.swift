@@ -1325,6 +1325,22 @@ final class CompanionModel: ObservableObject {
         Task.detached(priority: .utility) { await writer.write(data, to: url) }
     }
 
+    private var publishedBubble: String?
+    private var publishedBubbleAt: Date?
+
+    /// Writes `state/bubble.json` (the line in her speech bubble) when it changes and every 30 s otherwise, so the
+    /// Windows Herdr app's Ame window can show the same line. Best effort; the file is overwritten each time.
+    func publishBubble(_ text: String?, now: Date) {
+        let value = text ?? ""
+        guard CompanionMoodState.isDue(key: value, lastKey: publishedBubble, lastWrite: publishedBubbleAt, now: now) else { return }
+        publishedBubble = value
+        publishedBubbleAt = now
+        let data = CompanionBubbleState.payload(text: value, time: now)
+        let url = CompanionBubbleState.fileURL(companionDirectory: directory)
+        let writer = stateWriter
+        Task.detached(priority: .utility) { await writer.write(data, to: url) }
+    }
+
     // MARK: Headpats, hearts and the nap
 
     /// Loads the hearts level once, then decays it by wall time and publishes the bar.
@@ -1923,6 +1939,9 @@ struct CompanionView: View {
             .onChange(of: context.date) { _, date in
                 model.advance(now: date, mood: mood, activityID: activityID, skin: skin, status: commander?.agentStatus)
                 model.tickCutscene(now: date)
+                model.publishBubble(model.player.bubbleText(dialogue: model.dialogue,
+                                                            title: commander?.terminalTitleStripped,
+                                                            override: model.patBubble(now: date)), now: date)
                 model.refreshDialogue(sessionID: commander?.agentSessionID, registeredIDs: registeredSessionIDs,
                                      cwd: commander?.cwd, now: date)
                 model.refreshAme(sessionID: ame?.agentSessionID, now: date)
@@ -2535,6 +2554,19 @@ enum CompanionMoodState {
     static func isDue(key: String, lastKey: String?, lastWrite: Date?, now: Date) -> Bool {
         guard key == lastKey, let lastWrite else { return true }
         return now.timeIntervalSince(lastWrite) >= heartbeat
+    }
+}
+
+/// `state/bubble.json`: the speech bubble's current line and the time, next to `mood.json`.
+enum CompanionBubbleState {
+    static func payload(text: String, time: Date) -> Data {
+        let object: [String: Any] = ["text": text, "t": Int(time.timeIntervalSince1970)]
+        return (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
+
+    static func fileURL(companionDirectory: URL) -> URL {
+        CompanionMoodState.fileURL(companionDirectory: companionDirectory)
+            .deletingLastPathComponent().appendingPathComponent("bubble.json")
     }
 }
 
