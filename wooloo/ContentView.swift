@@ -856,6 +856,24 @@ private struct DestinationContentView: View {
         }
     }
 
+    /// Titles for the Ame theme's pane headers: the agent's name and detail, or "Shell" and the folder.
+    private var paneHeaders: [String: TerminalPaneHeader] {
+        var agents: [String: HerdrAgent] = [:]
+        for agent in herdr.snapshot?.agents ?? [] { agents[agent.paneID] = agent }
+        var result: [String: TerminalPaneHeader] = [:]
+        for pane in selectedPanes {
+            let folder = (pane.cwd ?? "").replacingOccurrences(of: "\\", with: "/")
+                .split(separator: "/").suffix(2).joined(separator: "/")
+            if let agent = agents[pane.paneID] {
+                result[pane.paneID] = TerminalPaneHeader(title: agent.displayName, sub: agent.detail ?? folder,
+                                                         status: agent.agentStatus ?? pane.agentStatus)
+            } else {
+                result[pane.paneID] = TerminalPaneHeader(title: "Shell", sub: folder, status: pane.agentStatus)
+            }
+        }
+        return result
+    }
+
     /// The main panel showing the selected terminal tab.
     @ViewBuilder
     private var terminalsPanel: some View {
@@ -867,6 +885,7 @@ private struct DestinationContentView: View {
                     text: "",
                     paneID: herdr.selectedPaneID ?? selectedPanes[0].paneID,
                     surfaceFeed: herdr.surfaceFeed,
+                    paneHeaders: paneHeaders,
                     onPresentSurface: { herdr.acknowledgeAgentSurface($0) },
                     sendPopupInput: { event, id, boot in herdr.sendPopupInput(event, terminalID: id, bootID: boot) },
                     closePopup: { id, boot in herdr.closePopup(terminalID: id, bootID: boot) },

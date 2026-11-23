@@ -210,6 +210,13 @@ private struct GridPoint: Comparable {
 
 /// A small AppKit input surface for Herdr's rendered pane snapshot. Herdr still
 /// owns the PTY; this view only displays its text and forwards keyboard input.
+/// What a Herdr-style pane header shows for one pane (Ame theme).
+struct TerminalPaneHeader: Equatable {
+    var title: String
+    var sub: String
+    var status: String?
+}
+
 struct TerminalPaneView: NSViewRepresentable {
     /// Terminal text size in points. Default 12; the TerminalTextSize preference (8...20) overrides it, read once
     /// at launch, so a mirrored terminal can be tuned to fit the same number of columns as its host.
@@ -230,6 +237,7 @@ struct TerminalPaneView: NSViewRepresentable {
     let text: String
     let paneID: String
     var surfaceFeed: HerdrSurfaceFeed? = nil
+    var paneHeaders: [String: TerminalPaneHeader] = [:]
     var onPresentSurface: ((HerdrSurface) -> Void)? = nil
     var sendPopupInput: ((HerdrInputEvent, String, String) -> Void)? = nil
     var closePopup: ((String, String) -> Void)? = nil
@@ -279,6 +287,7 @@ struct TerminalPaneView: NSViewRepresentable {
         view.fileLinks = fileLinks
         view.openFileLink = openFileLink
         view.onPresentSurface = onPresentSurface
+        view.paneHeaders = paneHeaders
         view.sendPopupInput = sendPopupInput
         view.closePopup = closePopup
         view.isRichText = false
@@ -332,6 +341,7 @@ struct TerminalPaneView: NSViewRepresentable {
         view.fileLinks = fileLinks
         view.openFileLink = openFileLink
         view.onPresentSurface = onPresentSurface
+        view.paneHeaders = paneHeaders
         view.sendPopupInput = sendPopupInput
         view.closePopup = closePopup
         let theme = context.environment.woolooTheme
@@ -1172,6 +1182,9 @@ enum TerminalKeyInput {
 
 final class HerdrTerminalTextView: NSTextView {
     var surfaceRevision: UInt64?
+    var paneHeaders: [String: TerminalPaneHeader] = [:] {
+        didSet { if oldValue != paneHeaders { needsDisplay = true } }
+    }
     var themeID: String?
     var theme = WoolooTheme.named(WoolooTheme.fallbackID)!
     var surfaceFeed: HerdrSurfaceFeed?
@@ -1434,6 +1447,7 @@ final class HerdrTerminalTextView: NSTextView {
             }
         }
         drawGraphics(in: dirtyRect, behindText: false)
+        drawPaneHeaders(in: context)
         if let surface, let popup = surface.popup, let geometry = popup.geometry(cols: surface.width, rows: surface.height) {
             context.saveGState()
             context.addRect(bounds)
@@ -1441,6 +1455,51 @@ final class HerdrTerminalTextView: NSTextView {
             context.clip(using: .evenOdd)
             context.setFillColor(NSColor.black.withAlphaComponent(0.3).cgColor)
             context.fill(bounds)
+            context.restoreGState()
+        }
+    }
+
+    /// Ame theme: a Herdr-style header over each pane's top (border) row: title, role or folder,
+    /// a status square, and an accent underline on the focused pane.
+    private func drawPaneHeaders(in context: CGContext) {
+        guard theme.id == "ame", !paneHeaders.isEmpty, let surface else { return }
+        let palette = theme.herdr
+        let color = { (hex: UInt32) in WoolooTheme.nsColor(hex) }
+        let bold = TerminalPaneView.boldFont, regular = TerminalPaneView.terminalFont
+        for id in surface.paneIDs {
+            guard let info = paneHeaders[id], let r = surface.paneRects[id], r.height >= 3, r.width >= 10 else { continue }
+            let row = pixelRect(HerdrRect(x: r.x, y: r.y, width: r.width, height: 1))
+            let focused = surface.focusedPaneID == id
+            context.saveGState()
+            context.clip(to: row)
+            context.setFillColor(color(palette.panel).cgColor)
+            context.fill(row)
+            context.setFillColor(color(focused ? palette.accent : palette.surface1).cgColor)
+            context.fill(CGRect(x: row.minX, y: row.maxY - 2, width: row.width, height: 2))
+            var x = row.minX + 6
+            let status: UInt32? = {
+                switch info.status ?? "" {
+                case "working": return palette.yellow
+                case "done": return palette.green
+                case "blocked": return palette.red
+                case "idle": return palette.overlay0
+                default: return nil
+                }
+            }()
+            if let status {
+                let side: CGFloat = 8
+                let square = CGRect(x: row.maxX - side - 8, y: row.minY + (row.height - side) / 2 - 1, width: side, height: side)
+                context.setFillColor(color(status).cgColor)
+                context.fill(square)
+            }
+            let title = NSAttributedString(string: info.title, attributes: [
+                .font: bold, .foregroundColor: color(focused ? palette.accent : palette.text)])
+            title.draw(at: NSPoint(x: x, y: row.minY))
+            x += title.size().width + 10
+            if !info.sub.isEmpty {
+                NSAttributedString(string: info.sub, attributes: [
+                    .font: regular, .foregroundColor: color(palette.overlay1)]).draw(at: NSPoint(x: x, y: row.minY))
+            }
             context.restoreGState()
         }
     }
