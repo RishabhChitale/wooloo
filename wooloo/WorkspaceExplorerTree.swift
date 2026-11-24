@@ -119,7 +119,7 @@ struct WorkspaceExplorerTree {
             guard key.hasPrefix(prefix) else { return nil }
             let rest = key.dropFirst(prefix.count)
             if rest == original { return prefix + renamed }
-            if rest.hasPrefix(original + "/") { return prefix + renamed + rest.dropFirst(original.count) }
+            if rest.hasPrefix(original + "/") { return prefix + renamed + String(rest.dropFirst(original.count)) }
             return nil
         }
         let prefix = identity + "|"
