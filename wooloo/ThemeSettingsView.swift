@@ -11,7 +11,9 @@ struct ThemeSettingsView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 230, maximum: 320), spacing: 14)]
 
-    private var selectedID: String { WoolooTheme.canonicalName(name) }
+    @AppStorage(ThemeSwitcher.pixelKey) private var pixelTheme = ""
+
+    private var selectedID: String { pixelTheme.isEmpty ? WoolooTheme.canonicalName(name) : pixelTheme }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -48,7 +50,14 @@ struct ThemeSettingsView: View {
                 .tracking(0.6)
             LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
                 ForEach(themes) { theme in
-                    Button { name = theme.id } label: {
+                    Button {
+                        if ThemeSwitcher.pixelIDs.contains(theme.id) {
+                            ThemeSwitcher.select(theme.id)
+                        } else {
+                            pixelTheme = ""
+                            name = theme.id
+                        }
+                    } label: {
                         ThemeCard(theme: theme, isSelected: theme.id == selectedID)
                     }
                     .buttonStyle(.plain)

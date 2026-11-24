@@ -515,20 +515,41 @@ struct EditorTabStyle: ViewModifier {
     let selected: Bool
     let presence: Color
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
-            .background {
-                ZStack {
-                    selected ? theme.sidebarBackground : theme.barBackground.opacity(0.45)
-                    presence
+        if theme.isPixel {
+            // The Windows app's tabs: a raised, outlined block for the selected tab.
+            let shape = RoundedRectangle(cornerRadius: theme.ameTabRadius, style: .continuous)
+            content
+                .background {
+                    ZStack {
+                        selected ? theme.ameRaised : theme.barBackground
+                        presence
+                    }
+                    .clipShape(shape)
+                    .padding(.vertical, 3)
                 }
-            }
-            .overlay(alignment: .trailing) { Color.primary.opacity(0.08).frame(width: 1) }
-            .overlay(alignment: .top) {
-                if selected { theme.accent.opacity(0.8).frame(height: 1) }
-            }
-            .overlay(alignment: .bottom) {
-                if !selected { Color.primary.opacity(0.08).frame(height: 1) }
-            }
+                .overlay {
+                    shape.strokeBorder(selected ? (theme.id == "mint" ? theme.accent : theme.ameBorderColor) : Color.clear,
+                                       lineWidth: theme.id == "mint" ? 2 : 1)
+                        .padding(.vertical, 3)
+                }
+                .padding(.horizontal, 1)
+        } else {
+            content
+                .background {
+                    ZStack {
+                        selected ? theme.sidebarBackground : theme.barBackground.opacity(0.45)
+                        presence
+                    }
+                }
+                .overlay(alignment: .trailing) { Color.primary.opacity(0.08).frame(width: 1) }
+                .overlay(alignment: .top) {
+                    if selected { theme.accent.opacity(0.8).frame(height: 1) }
+                }
+                .overlay(alignment: .bottom) {
+                    if !selected { Color.primary.opacity(0.08).frame(height: 1) }
+                }
+        }
     }
 }

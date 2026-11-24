@@ -656,8 +656,12 @@ struct HerdrDestinationSection: View {
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
-                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                        .imageScale(.small)
+                    if theme.isPixel {
+                        Text(isCollapsed ? theme.ameArrowClosed : theme.ameArrowOpen)
+                    } else {
+                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                            .imageScale(.small)
+                    }
                     Text(group.category.title.uppercased())
                     Text("\(group.spaces.count)").foregroundStyle(.tertiary)
                     Spacer(minLength: 0)
@@ -666,7 +670,7 @@ struct HerdrDestinationSection: View {
                     Capsule().fill(color.color).frame(height: 2)
                 }
             }
-            .font(.system(size: typography.secondary, weight: .semibold))
+            .font(theme.chromeFont(typography.secondary, weight: .semibold))
             .foregroundStyle(.secondary)
             .padding(.top, 6)
             .padding(.bottom, 1)
@@ -706,6 +710,13 @@ struct HerdrDestinationSection: View {
         categoryOverridesRaw = SpaceCategory.setting(category, for: space.label, in: categoryOverridesRaw)
     }
 
+    /// Agents of a Space that are working, blocked or finished and unseen: the Windows app's "unfinished" count.
+    private func unfinishedAgents(in space: HerdrWorkspace) -> Int {
+        ((store.snapshot ?? store.cachedSnapshot)?.agents ?? []).filter {
+            $0.workspaceID == space.workspaceID && ["working", "blocked", "done"].contains($0.agentStatus ?? "")
+        }.count
+    }
+
     /// One Space row: status, label, Git counts, attention marks, pills, drag and drop, context menu.
     @ViewBuilder
     private func spaceRow(_ space: HerdrWorkspace, overrides: [String: SpaceCategory]) -> some View {
@@ -731,8 +742,17 @@ struct HerdrDestinationSection: View {
                 }
             }
             if pills.isUnitSpace, pills.hasPills { SpacePillsView(summary: pills) }
+            if theme.isPixel {
+                let unfinished = unfinishedAgents(in: space)
+                if unfinished > 0 {
+                    Text("unfinished \(unfinished)")
+                        .font(theme.chromeFont(typography.caption))
+                        .foregroundStyle(theme.agentStatus("working"))
+                        .padding(.leading, 15)
+                }
             }
-            .font(.system(size: typography.emphasis, weight: .medium))
+            }
+            .font(theme.chromeFont(typography.emphasis, weight: .medium))
             .sidebarRow(selected: active && store.selectedWorkspaceID == space.workspaceID)
             .overlay(alignment: .bottom) {
                 if pills.working > 0 { SpaceProgressBar(percent: pills.workingPercent).padding(.horizontal, 8).padding(.bottom, 1) }

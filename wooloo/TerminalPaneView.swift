@@ -1462,10 +1462,11 @@ final class HerdrTerminalTextView: NSTextView {
     /// Ame theme: a Herdr-style header over each pane's top (border) row: title, role or folder,
     /// a status square, and an accent underline on the focused pane.
     private func drawPaneHeaders(in context: CGContext) {
-        guard theme.id == "ame", !paneHeaders.isEmpty, let surface else { return }
+        guard theme.isPixel, !paneHeaders.isEmpty, let surface else { return }
         let palette = theme.herdr
         let color = { (hex: UInt32) in WoolooTheme.nsColor(hex) }
-        let bold = TerminalPaneView.boldFont, regular = TerminalPaneView.terminalFont
+        let pixel = theme.pixelFontName.flatMap { NSFont(name: $0, size: 13) }
+        let bold = pixel ?? TerminalPaneView.boldFont, regular = pixel ?? TerminalPaneView.terminalFont
         for id in surface.paneIDs {
             guard let info = paneHeaders[id], let r = surface.paneRects[id], r.height >= 3, r.width >= 10 else { continue }
             let row = pixelRect(HerdrRect(x: r.x, y: r.y, width: r.width, height: 1))

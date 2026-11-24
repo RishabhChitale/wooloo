@@ -48,6 +48,8 @@ private struct DestinationContentView: View {
     @StateObject private var chrome = IntegratedWindowChrome()
     @State private var tabContentWidth: CGFloat = 0
     @State private var hoveredTabID: String?
+    @State private var showsPerformance = false
+    @State private var ameExplorerTab = "files"
     @StateObject private var shortcutStore = HerdrShortcutStore()
     private var shortcutMap: HerdrShortcutMap { shortcutStore.map }
     @State private var shortcutPrefixActive = false
@@ -375,6 +377,20 @@ private struct DestinationContentView: View {
                                    width: filesSidebarWidth, spacesOnly: spacesOnly)
                     filesSidebarSpaces
                     HStack(spacing: 12) {
+                        if theme.isPixel {
+                            Button {
+                                window.settingsShowShortcuts = false
+                                window.settingsShowRemoteAccess = false
+                                window.showsSettings = true
+                            } label: {
+                                Label("Settings", systemImage: "gearshape")
+                                    .font(theme.chromeFont(typography.secondary))
+                                    .foregroundStyle(Color.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Herdr settings")
+                            .accessibilityIdentifier("sidebar-settings")
+                        }
                         Spacer()
                         Button { showsGitHub.toggle() } label: {
                             Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
@@ -511,6 +527,9 @@ private struct DestinationContentView: View {
                 .buttonStyle(.plain)
                 .help("New Space")
                 .disabled(!herdr.isConnected)
+                if spacesToggle || !window.showsFilesSidebar {
+                    ThemeButton().padding(.leading, 6)
+                }
             }
             ForEach(destinations.stores, id: \.contextID) { store in
                 HerdrDestinationSection(store: store, notifier: notifier,
@@ -758,7 +777,80 @@ private struct DestinationContentView: View {
 
     /// Under the panes, level with the sidebar's session bar: the sidebar toggles, the selected
     /// Space and the prefix and connection state.
+    @ViewBuilder
     private var statusBar: some View {
+        if theme.isPixel { pixelStatusBar } else { classicStatusBar }
+    }
+
+    /// The Windows app's footer: machine, Git counts, agent count and the command palette hint.
+    private var pixelStatusBar: some View {
+        let agents = herdr.snapshot?.agents ?? []
+        let needs = agents.filter { $0.agentStatus == "blocked" }.count
+        let git = selectedWorkspace.flatMap { herdr.workspaceGitStatuses[$0.workspaceID] }
+        return HStack(spacing: 16) {
+            Button { window.showsSidebar.toggle() } label: {
+                Image(systemName: "sidebar.left")
+                    .frame(width: 22, height: typography.metric(29))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(window.showsSidebar ? "Hide sidebar" : "Show sidebar")
+            HStack(spacing: 6) {
+                Image(systemName: herdr.machine == nil ? "desktopcomputer" : "server.rack")
+                Text(herdr.machine?.label ?? "This computer").lineLimit(1)
+            }
+            .help(herdr.machine?.target ?? "This Mac")
+            if let git, git.ahead > 0 || git.behind > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.branch")
+                    Text("↑\(git.ahead) ↓\(git.behind)")
+                }
+            }
+            HStack(spacing: 6) {
+                Rectangle().fill(theme.muted).frame(width: 6, height: 6)
+                Text("\(agents.count) \(agents.count == 1 ? "agent" : "agents")")
+                if needs > 0 {
+                    Text("· \(needs) \(needs == 1 ? "needs" : "need") you").foregroundStyle(theme.error)
+                }
+            }
+            if shortcutPrefixActive {
+                Text("PREFIX").foregroundStyle(theme.accent)
+            }
+            Spacer()
+            if !herdr.isConnected {
+                Text("Disconnected").foregroundStyle(theme.warning)
+            } else if !herdr.inputReady {
+                Text("Connecting terminal…").foregroundStyle(theme.warning)
+            }
+            Button { commands.perform(.commandPalette) } label: {
+                Text("⌘⇧P  commands").foregroundStyle(theme.muted.opacity(0.8))
+            }
+            .buttonStyle(.plain)
+            .help("Command Palette")
+            Button { window.showsFilesSidebar.toggle() } label: {
+                Image(systemName: "sidebar.right")
+                    .frame(width: 22, height: typography.metric(29))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(window.showsFilesSidebar ? "Hide Files and Changes" : "Show Files and Changes")
+        }
+        .font(theme.chromeFont(typography.secondary))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .frame(height: typography.metric(29))
+        .background(sidebarBackground)
+        .contentShape(Rectangle())
+        .contextMenu {
+            if let selectedWorkspace {
+                spaceActions(selectedWorkspace)
+                Divider()
+            }
+            globalActions
+        }
+    }
+
+    private var classicStatusBar: some View {
         HStack(spacing: 8) {
             Button { window.showsSidebar.toggle() } label: {
                 Image(systemName: "sidebar.left")
@@ -1058,7 +1150,7 @@ private struct DestinationContentView: View {
         }
         .frame(height: max(textScale.metric(30), chrome.metrics.minimumHeight))
         .background(barBackground)
-        .overlay(alignment: .bottom) { Color.primary.opacity(0.08).frame(height: 1) }
+        .overlay(alignment: .bottom) { (theme.isPixel ? theme.ameBorderColor : Color.primary.opacity(0.08)).frame(height: 1) }
     }
 
     private var focusedTabID: String? { commands.focusedTabID }
@@ -1087,6 +1179,7 @@ private struct DestinationContentView: View {
                             ForEach(Array(selectedTabs.enumerated()), id: \.element.id) { index, tab in
                                 terminalTab(tab, index: index).id(tab.tabID)
                             }
+                            if theme.isPixel { performanceTab }
                             if !documents.isEmpty || window.showsSearchTab {
                                 Divider().frame(height: textScale.metric(17)).padding(.horizontal, 3)
                                     .frame(maxHeight: .infinity)
@@ -1138,6 +1231,10 @@ private struct DestinationContentView: View {
                         Color.primary.opacity(0.12).frame(width: 1).allowsHitTesting(false)
                     }
                 }
+            }
+            if theme.isPixel {
+                panelButton("Files", symbol: "folder", tab: "files")
+                panelButton("Changes", symbol: "arrow.triangle.branch", tab: "changes")
             }
             Button { commands.perform(.newTab) } label: {
                 TabBarAddIcon(symbol: "terminal").frame(width: 28, height: textScale.metric(30))
@@ -1242,7 +1339,8 @@ private struct DestinationContentView: View {
                     let marks = notifier.attentionCount(inTab: tab.tabID, snapshot: herdr.snapshot, contextID: herdr.contextID)
                     HerdrAttentionBadge(requests: marks.requests, done: marks.done)
                 }
-                .font(.system(size: textScale.body))
+                .font(theme.chromeFont(textScale.body))
+                .foregroundStyle(theme.isPixel && !tabIsFocused(tab.tabID) ? theme.muted : Color.primary)
                 .padding(.leading, 8)
                 .padding(.trailing, 3)
                 .frame(height: textScale.metric(30))
@@ -1312,6 +1410,70 @@ private struct DestinationContentView: View {
         commands.requestCloseTab(tab)
     }
 
+    /// The Windows app's Performance tab: host load and agent usage, in a popover here.
+    private var performanceTab: some View {
+        Button { showsPerformance.toggle() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "chart.bar.xaxis").foregroundStyle(theme.accent)
+                Text("Performance")
+            }
+            .font(theme.chromeFont(textScale.body))
+            .foregroundStyle(showsPerformance ? theme.text : theme.muted)
+            .padding(.horizontal, 8)
+            .frame(height: textScale.metric(30))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .modifier(EditorTabStyle(selected: showsPerformance, presence: Color.clear))
+        .fixedSize(horizontal: true, vertical: false)
+        .help("Host performance and agent usage")
+        .popover(isPresented: $showsPerformance, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                HostStatsSection(machine: explorerMachine,
+                    directory: explorerLocation?.machine?.id == explorerMachine?.id ? explorerLocation?.root : nil)
+                Divider()
+                AgentQuotaSection(machine: explorerMachine)
+            }
+            .padding(10)
+            .frame(width: 300)
+            .environment(\.woolooTheme, theme)
+            .environment(\.woolooTypography, textScale)
+        }
+    }
+
+    /// Files and Changes buttons of the Windows app's tab bar: they open that view in the right sidebar.
+    private func panelButton(_ title: String, symbol: String, tab: String) -> some View {
+        let on = window.showsFilesSidebar && showsExplorer && ameExplorerTab == tab
+        return Button {
+            if on {
+                window.showsFilesSidebar = false
+            } else {
+                showsExplorer = true
+                ameExplorerTab = tab
+                window.showsFilesSidebar = true
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .woolooExplorerTab, object: tab)
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: symbol)
+                Text(title)
+            }
+            .font(theme.chromeFont(textScale.secondary))
+            .foregroundStyle(on ? theme.text : theme.muted)
+            .padding(.horizontal, 8)
+            .frame(height: textScale.metric(24))
+            .background(on ? theme.ameSelected : Color.clear,
+                        in: RoundedRectangle(cornerRadius: theme.ameTabRadius > 0 ? 6 : 0))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 1)
+        .help(on ? "Hide \(title)" : "Show \(title)")
+        .accessibilityIdentifier("panel-button-\(tab)")
+    }
+
     private var searchTab: some View {
         HStack(spacing: 0) {
             Button { openSearch(replace: false) } label: {
@@ -1319,7 +1481,7 @@ private struct DestinationContentView: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(theme.accent)
                     Text(search.title).lineLimit(1).truncationMode(.middle).frame(maxWidth: textScale.base * 12)
                 }
-                .font(.system(size: textScale.body))
+                .font(theme.chromeFont(textScale.body))
                 .padding(.leading, 8)
                 .padding(.trailing, 3)
                 .frame(height: textScale.metric(30))
@@ -1356,7 +1518,7 @@ private struct DestinationContentView: View {
                         .frame(maxWidth: textScale.base * 12)
                     if document.isDirty { Circle().fill(theme.warning).frame(width: 5, height: 5) }
                 }
-                .font(.system(size: textScale.body))
+                .font(theme.chromeFont(textScale.body))
                 .padding(.leading, 8)
                 .padding(.trailing, 3)
                 .frame(height: textScale.metric(30))
@@ -1757,7 +1919,7 @@ private struct DestinationContentView: View {
     private func sectionTitle(_ title: String, icon: String, tint: Color? = nil) -> some View {
         HStack(spacing: 8) {
             Text(title)
-                .font(.system(size: typography.secondary, weight: .semibold))
+                .font(theme.chromeFont(typography.secondary, weight: .semibold))
                 .tracking(0.7)
             Image(systemName: icon)
                 .font(.system(size: typography.secondary))
@@ -1789,6 +1951,7 @@ extension View {
 
 private struct SidebarRowModifier: ViewModifier {
     @Environment(\.woolooTypography) private var typography
+    @Environment(\.woolooTheme) private var theme
     let selected: Bool
     /// Height at 11 pt text; grows with the interface text size.
     let height: CGFloat
@@ -1799,9 +1962,14 @@ private struct SidebarRowModifier: ViewModifier {
             .frame(minHeight: typography.metric(height))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                selected ? Color.primary.opacity(0.08) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 4)
+                selected ? (theme.isPixel ? theme.ameSelected : Color.primary.opacity(0.08)) : Color.clear,
+                in: RoundedRectangle(cornerRadius: theme.isPixel ? 0 : 4)
             )
+            .overlay {
+                if theme.isPixel && selected {
+                    Rectangle().strokeBorder(theme.accent, lineWidth: 2)
+                }
+            }
             // Plain buttons only hit-test drawn pixels; make the whole row clickable.
             .contentShape(Rectangle())
     }
@@ -1967,14 +2135,20 @@ struct AgentStatusDot: View {
 
     var body: some View {
         let color = theme.agentStatus(status)
-        Group {
-            switch WoolooTheme.agentStatusMark(status) {
-            case .dot: Circle().fill(color)
-            case .ring: Circle().strokeBorder(color, lineWidth: 1.25)
-            case .faint: Circle().fill(color).padding(1.5)
+        if theme.isPixel {
+            // Square marks for Ame, tall bars for Mint Bot, as in the Windows app.
+            Rectangle().fill(color)
+                .frame(width: theme.id == "mint" ? 4 : 7, height: theme.id == "mint" ? 12 : 7)
+        } else {
+            Group {
+                switch WoolooTheme.agentStatusMark(status) {
+                case .dot: Circle().fill(color)
+                case .ring: Circle().strokeBorder(color, lineWidth: 1.25)
+                case .faint: Circle().fill(color).padding(1.5)
+                }
             }
+            .frame(width: 6, height: 6)
         }
-        .frame(width: 6, height: 6)
     }
 }
 

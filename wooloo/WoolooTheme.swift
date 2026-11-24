@@ -39,6 +39,12 @@ struct WoolooTheme: Identifiable, Equatable {
                     background: 0x232431, foreground: 0xE6E6F5,
                     cursor: 0xFF8FC8, selectionBackground: 0x4B4F86,
                     ansi: [0x232431, 0xFF7A93, 0x8FE3B0, 0xF4B040, 0x8FA8FF, 0xFF8FC8, 0x8FE3E8, 0xD8D8EC, 0x4A4C66, 0xFF9DB0, 0xAEF0C8, 0xFFD070, 0xB3C3FF, 0xFFB0DC, 0xB0F0F4, 0xFFFFFF]),
+        // The Windows Herdr app's Mint Bot theme (themes/mint.json); like Ame it is wooloo-only.
+        WoolooTheme(id: "mint", name: "Mint Bot", isDark: true,
+                    herdr: .init(accent: 0x7DFFD9, panel: 0x0D1E22, activeRow: 0x1F5C5C, selection: 0x245E5E, surface0: 0x1B4148, surface1: 0x225058, surfaceDim: 0x10252A, overlay0: 0x6A9A92, overlay1: 0x6F9A94, text: 0xE4FFF7, subtext: 0x9CC9BF, mauve: 0xFF9AC8, green: 0x7DFFB0, yellow: 0xFFD666, red: 0xFF7F7F, blue: 0x6FB7FF, teal: 0x7DFFD9, peach: 0xFF9A76),
+                    background: 0x10252A, foreground: 0xE4FFF7,
+                    cursor: 0xFF9A76, selectionBackground: 0x245E5E,
+                    ansi: [0x10252A, 0xFF7F7F, 0x7DFFB0, 0xFFD666, 0x6FB7FF, 0xFF9AC8, 0x7DFFD9, 0xD4EFE7, 0x2F5456, 0xFF9A9A, 0x9DFFC8, 0xFFE28A, 0x9FCFFF, 0xFFB8DA, 0xA8FFE8, 0xFFFFFF]),
         WoolooTheme(id: "catppuccin-latte", name: "Catppuccin Latte", isDark: false,
                     herdr: .init(accent: 0x1E66F5, panel: 0xEFF1F5, activeRow: 0xE6E9EF, selection: 0xBDD0F5, surface0: 0xCCD0DA, surface1: 0xBCC0CC, surfaceDim: 0xE6E9EF, overlay0: 0x9CA0B0, overlay1: 0x8C8FA1, text: 0x4C4F69, subtext: 0x6C6F85, mauve: 0x8839EF, green: 0x40A02B, yellow: 0xDF8E1D, red: 0xD20F39, blue: 0x1E66F5, teal: 0x179299, peach: 0xFE640B),
                     background: 0xEFF1F5, foreground: 0x4C4F69,
@@ -263,12 +269,18 @@ final class ThemeStore: ObservableObject {
     private var darkName = ""
     private var observer: NSObjectProtocol?
     private var configObserver: AnyCancellable?
+    private var defaultsObserver: AnyCancellable?
 
     init() {
         reload()
         configObserver = NotificationCenter.default.publisher(for: .woolooLocalConfigSaved)
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.reload() }
+            }
+        defaultsObserver = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.resolve() }
             }
         observer = DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("AppleInterfaceThemeChangedNotification"), object: nil, queue: .main
@@ -290,7 +302,9 @@ final class ThemeStore: ObservableObject {
     private func resolve() {
         let base = WoolooTheme.named(name) ?? WoolooTheme.named(WoolooTheme.fallbackID)!
         var next = base
-        if autoSwitch {
+        if let pixel = ThemeSwitcher.pixelOverride, let chosen = WoolooTheme.named(pixel) {
+            next = chosen
+        } else if autoSwitch {
             let systemDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
             let explicit = systemDark ? darkName : lightName
             if let chosen = WoolooTheme.named(explicit) {

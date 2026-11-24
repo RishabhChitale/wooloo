@@ -83,6 +83,9 @@ struct WorkspaceBrowserView: View {
             treeFocused = false
             if tab == "files" || tab == "changes" { model.showsChanges = tab == "changes" }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .woolooExplorerTab)) { note in
+            if let tab = note.object as? String { explorerTab = tab }
+        }
         .onChange(of: location?.identity) { _, _ in
             historyPath = nil
             selectedHistoryCommit = nil
