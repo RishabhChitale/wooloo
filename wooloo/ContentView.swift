@@ -76,6 +76,7 @@ private struct DestinationContentView: View {
     @AppStorage("SidebarWidth") private var sidebarWidth = 206.0
     @AppStorage("FilesSidebarWidth") private var filesSidebarWidth = 244.0
     @AppStorage("AgentsInSelectedSpaceOnly") private var agentsInSelectedSpaceOnly = false
+    @AppStorage("AgentsCompact") private var agentsCompact = false
     @State private var followsHerdrAgentView = true
     @AppStorage("filesSidebarShowsExplorer") private var showsExplorer = false
     @AppStorage("filesSidebarShowsGitHub") private var showsGitHub = false
@@ -586,7 +587,7 @@ private struct DestinationContentView: View {
 
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 0) {
-                            sectionTitle("AGENTS", icon: "sparkles")
+                            if theme.isPixel { pixelAgentsHeading } else { sectionTitle("AGENTS", icon: "sparkles") }
                             Spacer()
                             if let state = herdr.agentViewState, let label = state.label {
                                 Menu {
@@ -610,6 +611,7 @@ private struct DestinationContentView: View {
                                 .accessibilityLabel("Herdr Agent View: \(label)")
                                 .accessibilityIdentifier("herdr-agent-view")
                             }
+                            if theme.isPixel { agentsCompactToggle }
                             Button {
                                 agentsInSelectedSpaceOnly.toggle()
                             } label: {
@@ -640,6 +642,9 @@ private struct DestinationContentView: View {
                             Button {
                                 focusAgent(agent)
                             } label: {
+                                if theme.isPixel {
+                                    pixelAgentCard(agent, selected: agent.paneID == herdr.selectedPaneID)
+                                } else {
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 7) {
                                         AgentStatusDot(status: agent.agentStatus)
@@ -676,6 +681,7 @@ private struct DestinationContentView: View {
                                 }
                                 .sidebarRow(selected: agent.paneID == herdr.selectedPaneID,
                                             height: agent.detail == nil ? 44 : 59)
+                                }
                             }
                             .buttonStyle(.plain)
                             .help(agentTooltip(agent))
@@ -770,6 +776,11 @@ private struct DestinationContentView: View {
             }
             .id(herdr.contextID)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay { if theme.isPixel && showsPerformance { performancePage } }
+            .overlay(alignment: .topTrailing) {
+                if theme.isPixel { AmeToastHost(agents: herdr.snapshot?.agents ?? []) }
+            }
+            .onChange(of: herdr.selectedTabID) { _, _ in showsPerformance = false }
             Divider()
             statusBar
         }
@@ -787,6 +798,7 @@ private struct DestinationContentView: View {
         let agents = herdr.snapshot?.agents ?? []
         let needs = agents.filter { $0.agentStatus == "blocked" }.count
         let git = selectedWorkspace.flatMap { herdr.workspaceGitStatuses[$0.workspaceID] }
+        let footerCwd = selectedPanes.first(where: { $0.paneID == herdr.selectedPaneID })?.cwd ?? selectedPanes.first?.cwd
         return HStack(spacing: 16) {
             Button { window.showsSidebar.toggle() } label: {
                 Image(systemName: "sidebar.left")
@@ -800,6 +812,7 @@ private struct DestinationContentView: View {
                 Text(herdr.machine?.label ?? "This computer").lineLimit(1)
             }
             .help(herdr.machine?.target ?? "This Mac")
+            FooterBranchLabel(cwd: footerCwd, local: herdr.machine == nil)
             if let git, git.ahead > 0 || git.behind > 0 {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.triangle.branch")
@@ -1427,18 +1440,27 @@ private struct DestinationContentView: View {
         .modifier(EditorTabStyle(selected: showsPerformance, presence: Color.clear))
         .fixedSize(horizontal: true, vertical: false)
         .help("Host performance and agent usage")
-        .popover(isPresented: $showsPerformance, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 10) {
+    }
+
+    /// The Performance tab's page: it covers the panes until another tab is chosen.
+    private var performancePage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("PERFORMANCE")
+                    .font(theme.chromeFont(typography.secondary, weight: .semibold))
+                    .tracking(0.7)
+                    .foregroundStyle(theme.accent)
                 HostStatsSection(machine: explorerMachine,
                     directory: explorerLocation?.machine?.id == explorerMachine?.id ? explorerLocation?.root : nil)
                 Divider()
                 AgentQuotaSection(machine: explorerMachine)
             }
-            .padding(10)
-            .frame(width: 300)
-            .environment(\.woolooTheme, theme)
-            .environment(\.woolooTypography, textScale)
+            .padding(16)
+            .frame(maxWidth: 520, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(theme.contentBackground)
+        .overlay(Rectangle().strokeBorder(theme.ameBorderColor, lineWidth: 2))
     }
 
     /// Files and Changes buttons of the Windows app's tab bar: they open that view in the right sidebar.
@@ -1927,6 +1949,57 @@ private struct DestinationContentView: View {
         .foregroundStyle(tint ?? Color.secondary)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
+    }
+
+    /// The Windows strip's heading: "AGENTS · <Space>".
+    private var pixelAgentsHeading: some View {
+        Text("\(theme.ameArrowOpen) AGENTS" + (selectedWorkspace.map { " · \($0.label)" } ?? ""))
+            .font(theme.chromeFont(typography.secondary, weight: .semibold))
+            .tracking(0.7)
+            .lineLimit(1)
+            .foregroundStyle(theme.accent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+    }
+
+    private var agentsCompactToggle: some View {
+        Button { agentsCompact.toggle() } label: {
+            Text(agentsCompact ? "[+] expand" : "[-] compact")
+                .font(theme.chromeFont(typography.caption))
+                .foregroundStyle(theme.muted)
+                .padding(.horizontal, 4)
+        }
+        .buttonStyle(.plain)
+        .help(agentsCompact ? "Show agent details" : "Hide agent details")
+    }
+
+    /// An agent card as in the Windows strip: status square, name, machine badge, then status and detail.
+    private func pixelAgentCard(_ agent: HerdrAgent, selected: Bool) -> some View {
+        HStack(spacing: 8) {
+            AgentStatusDot(status: agent.agentStatus)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
+                    Text(agent.displayName)
+                        .font(theme.chromeFont(typography.body, weight: .semibold))
+                        .foregroundStyle(theme.text)
+                        .lineLimit(1)
+                    Text(herdr.machine == nil ? "MAC" : "PC")
+                        .font(theme.chromeFont(typography.caption, weight: .semibold))
+                        .foregroundStyle(theme.accent)
+                        .padding(.horizontal, 3)
+                        .overlay(Rectangle().strokeBorder(theme.accent.opacity(0.6), lineWidth: 1))
+                }
+                if !agentsCompact {
+                    Text(agent.detail.map { "\(agent.displayStatus) · \($0)" } ?? agent.displayStatus)
+                        .font(theme.chromeFont(typography.secondary))
+                        .foregroundStyle(theme.muted)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .sidebarRow(selected: selected, height: agentsCompact ? 28 : 44)
+        .overlay(Rectangle().strokeBorder(theme.ameBorderColor, lineWidth: selected ? 0 : 1))
     }
 
     private func agentLocation(_ agent: HerdrAgent) -> String {

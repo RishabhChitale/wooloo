@@ -1447,6 +1447,7 @@ final class HerdrTerminalTextView: NSTextView {
             }
         }
         drawGraphics(in: dirtyRect, behindText: false)
+        drawPaneBorders(in: context)
         drawPaneHeaders(in: context)
         if let surface, let popup = surface.popup, let geometry = popup.geometry(cols: surface.width, rows: surface.height) {
             context.saveGState()
@@ -1455,6 +1456,22 @@ final class HerdrTerminalTextView: NSTextView {
             context.clip(using: .evenOdd)
             context.setFillColor(NSColor.black.withAlphaComponent(0.3).cgColor)
             context.fill(bounds)
+            context.restoreGState()
+        }
+    }
+
+    /// Pixel themes: a 2 px frame around every pane, accent on the focused one, as in the Windows app.
+    private func drawPaneBorders(in context: CGContext) {
+        guard theme.isPixel, let surface else { return }
+        let palette = theme.herdr
+        for id in surface.paneIDs {
+            guard let r = surface.paneRects[id], r.width >= 4, r.height >= 3 else { continue }
+            let frame = pixelRect(HerdrRect(x: r.x, y: r.y, width: r.width, height: r.height)).insetBy(dx: 1, dy: 1)
+            let focused = surface.focusedPaneID == id
+            context.saveGState()
+            context.setStrokeColor(WoolooTheme.nsColor(focused ? palette.accent : palette.surface1).cgColor)
+            context.setLineWidth(2)
+            context.stroke(frame)
             context.restoreGState()
         }
     }
