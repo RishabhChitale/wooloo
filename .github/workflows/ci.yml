@@ -40,7 +40,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
     # MarkdownView's manifest needs Swift 6.2, which ships with Xcode 26.
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
