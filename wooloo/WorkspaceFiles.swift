@@ -596,15 +596,20 @@ enum WorkspaceFiles {
             // when it could not be hashed, e.g. without git, which says nothing about the file)
             // and stamp. `stat -c` is GNU's and BusyBox's, `stat -f` BSD's and macOS's.
             let known = remoteVersions.withLock { cache in paths.map { cache[location.identity + "\0" + $0] } }
-            let script = "root=$(realpath \(quote(location.root))) || exit 70; date +%s; "
-                + zip(paths, known).map { path, known in
-                    "if f=$(realpath \(quote(location.root + "/" + path)) 2>/dev/null) && case \"$f\" in \"$root\"/*) true;; *) false;; esac && [ -f \"$f\" ]; then "
-                        + "s=$(stat -c '%s %Y %Z %i' \"$f\" 2>/dev/null || stat -f '%z %m %c %i' \"$f\" 2>/dev/null); "
-                        + (known.map { "if [ -n \"$s\" ] && [ \"$s\" = \(quote($0.stamp)) ]; then echo \"= $s\"; else " } ?? "")
-                        + "h=$(cd / && GIT_DEFAULT_HASH=sha1 git hash-object --no-filters \"$f\" 2>/dev/null) || h='?'; echo \"$h $s\"; "
-                        + (known == nil ? "" : "fi; ")
-                        + "else echo -; fi; "
-                }.joined()
+            var script = "root=$(realpath \(quote(location.root))) || exit 70; date +%s; "
+            for (path, known) in zip(paths, known) {
+                let full: String = quote(location.root + "/" + path)
+                var part: String = "if f=$(realpath \(full) 2>/dev/null) && case \"$f\" in \"$root\"/*) true;; *) false;; esac && [ -f \"$f\" ]; then "
+                part += "s=$(stat -c '%s %Y %Z %i' \"$f\" 2>/dev/null || stat -f '%z %m %c %i' \"$f\" 2>/dev/null); "
+                if let known {
+                    let stamp: String = quote(known.stamp)
+                    part += "if [ -n \"$s\" ] && [ \"$s\" = \(stamp) ]; then echo \"= $s\"; else "
+                }
+                part += "h=$(cd / && GIT_DEFAULT_HASH=sha1 git hash-object --no-filters \"$f\" 2>/dev/null) || h='?'; echo \"$h $s\"; "
+                if known != nil { part += "fi; " }
+                part += "else echo -; fi; "
+                script += part
+            }
             guard let output = try? ssh(machine, script, limit: paths.count * 160 + 1_000) else { return [:] }
             var lines = String(decoding: output, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false)
                 .map(String.init)
