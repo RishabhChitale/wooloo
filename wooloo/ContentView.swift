@@ -286,7 +286,7 @@ private struct DestinationContentView: View {
         }
     }
 
-    var body: some View {
+    private var windowAlerts: some View {
         windowSheets
         .alert("Herdr action failed", isPresented: Binding(
             get: { herdr.actionError != nil },
@@ -324,6 +324,10 @@ private struct DestinationContentView: View {
                     .environment(\.woolooTypography, textScale)
             }
         }
+    }
+
+    var body: some View {
+        windowAlerts
         .alert(window.renameTarget?.title ?? "Rename", isPresented: Binding(
             get: { window.renameTarget != nil }, set: { if !$0 { window.renameTarget = nil } }
         )) {
