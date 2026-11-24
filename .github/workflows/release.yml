@@ -31,7 +31,7 @@ concurrency:
 jobs:
   build:
     name: Build
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 45
     permissions:
       contents: read
@@ -137,7 +137,7 @@ jobs:
   publish:
     name: Sign and publish
     needs: build
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 15
     permissions:
       contents: write
