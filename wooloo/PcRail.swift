@@ -211,7 +211,12 @@ enum AgentSprites {
     static func image(dex: Int) -> NSImage? {
         if let cached = cache.object(forKey: NSNumber(value: dex)) { return cached }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        guard let image = NSImage(contentsOfFile: "\(home)/.local/share/pokemon-agents/\(dex).gif") else { return nil }
+        let folder = "\(home)/.local/share/pokemon-agents"
+        var loaded: NSImage?
+        for name in ["bw-\(dex).gif", "\(dex).gif", "\(dex).png"] where loaded == nil {
+            loaded = NSImage(contentsOfFile: "\(folder)/\(name)")
+        }
+        guard let image = loaded else { return nil }
         cache.setObject(image, forKey: NSNumber(value: dex))
         return image
     }
