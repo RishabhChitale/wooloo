@@ -238,6 +238,8 @@ struct TerminalPaneView: NSViewRepresentable {
     let paneID: String
     var surfaceFeed: HerdrSurfaceFeed? = nil
     var paneHeaders: [String: TerminalPaneHeader] = [:]
+    /// Header buttons (split, maximize, close) for panes Herdr runs on this Mac; nil leaves them out.
+    var paneAction: ((String, String) -> Void)? = nil
     var onPresentSurface: ((HerdrSurface) -> Void)? = nil
     var sendPopupInput: ((HerdrInputEvent, String, String) -> Void)? = nil
     var closePopup: ((String, String) -> Void)? = nil
@@ -288,6 +290,7 @@ struct TerminalPaneView: NSViewRepresentable {
         view.openFileLink = openFileLink
         view.onPresentSurface = onPresentSurface
         view.paneHeaders = paneHeaders
+        view.paneAction = paneAction
         view.sendPopupInput = sendPopupInput
         view.closePopup = closePopup
         view.isRichText = false
@@ -342,6 +345,7 @@ struct TerminalPaneView: NSViewRepresentable {
         view.openFileLink = openFileLink
         view.onPresentSurface = onPresentSurface
         view.paneHeaders = paneHeaders
+        view.paneAction = paneAction
         view.sendPopupInput = sendPopupInput
         view.closePopup = closePopup
         let theme = context.environment.woolooTheme
@@ -1189,6 +1193,9 @@ final class HerdrTerminalTextView: NSTextView {
     var paneHeaders: [String: TerminalPaneHeader] = [:] {
         didSet { if oldValue != paneHeaders { needsDisplay = true } }
     }
+    var paneAction: ((String, String) -> Void)? {
+        didSet { needsDisplay = true }
+    }
     var themeID: String?
     var theme = WoolooTheme.named(WoolooTheme.fallbackID)!
     var surfaceFeed: HerdrSurfaceFeed?
@@ -1510,7 +1517,8 @@ final class HerdrTerminalTextView: NSTextView {
             }()
             if let status {
                 let side: CGFloat = 8
-                let square = CGRect(x: row.maxX - side - 8, y: row.minY + (row.height - side) / 2 - 1, width: side, height: side)
+                let reserved: CGFloat = headerButtonRects(for: r).isEmpty ? 0 : TerminalPaneView.cellWidth * 12 + 6
+                let square = CGRect(x: row.maxX - side - 8 - reserved, y: row.minY + (row.height - side) / 2 - 1, width: side, height: side)
                 context.setFillColor(color(status).cgColor)
                 context.fill(square)
             }
@@ -1522,8 +1530,47 @@ final class HerdrTerminalTextView: NSTextView {
                 NSAttributedString(string: info.sub, attributes: [
                     .font: regular, .foregroundColor: color(palette.overlay1)]).draw(at: NSPoint(x: x, y: row.minY))
             }
+            for button in headerButtonRects(for: r) {
+                let tint: UInt32 = button.id == "close" ? palette.red : palette.overlay1
+                let glyph = NSAttributedString(string: button.glyph, attributes: [
+                    .font: NSFont.systemFont(ofSize: 12), .foregroundColor: color(tint)])
+                let size = glyph.size()
+                glyph.draw(at: NSPoint(x: button.rect.midX - size.width / 2, y: button.rect.midY - size.height / 2))
+            }
             context.restoreGState()
         }
+    }
+
+    private static let headerButtons: [(id: String, glyph: String)] = [
+        ("split-right", "\u{25EB}"), ("split-down", "\u{229F}"), ("zoom", "\u{2922}"), ("close", "\u{2715}")
+    ]
+
+    /// The header's button squares for one pane, right to left from the pane's edge; empty on a narrow pane.
+    private func headerButtonRects(for paneRect: HerdrRect) -> [(id: String, glyph: String, rect: NSRect)] {
+        var result: [(id: String, glyph: String, rect: NSRect)] = []
+        guard paneAction != nil, paneRect.width >= 40 else { return result }
+        let row = pixelRect(HerdrRect(x: paneRect.x, y: paneRect.y, width: paneRect.width, height: 1))
+        let width = TerminalPaneView.cellWidth * 3
+        let count = CGFloat(HerdrTerminalTextView.headerButtons.count)
+        var x = row.maxX - 6 - width * count
+        for button in HerdrTerminalTextView.headerButtons {
+            result.append((id: button.id, glyph: button.glyph, rect: NSRect(x: x, y: row.minY, width: width, height: row.height)))
+            x += width
+        }
+        return result
+    }
+
+    /// The header button under the event, with its pane.
+    private func headerButtonHit(_ event: NSEvent, in surface: HerdrSurface) -> (action: String, paneID: String)? {
+        guard paneAction != nil else { return nil }
+        let point = convert(event.locationInWindow, from: nil)
+        for id in surface.paneIDs {
+            guard paneHeaders[id] != nil, let r = surface.paneRects[id] else { continue }
+            for button in headerButtonRects(for: r) where button.rect.contains(point) {
+                return (action: button.id, paneID: id)
+            }
+        }
+        return nil
     }
 
     private func pixelRect(_ rect: HerdrRect) -> NSRect {
@@ -2010,6 +2057,11 @@ final class HerdrTerminalTextView: NSTextView {
             }
             if !event.modifierFlags.contains(.shift), forwardMouse(.down(0), event: event, hold: true) { return }
             if let terminalGrid { beginCellSelection(with: event, in: terminalGrid) }
+            return
+        }
+        if let surface, let hit = headerButtonHit(event, in: surface) {
+            window?.makeFirstResponder(self)
+            paneAction?(hit.action, hit.paneID)
             return
         }
         if event.modifierFlags.contains(.command), let link = link(at: event.locationInWindow), open(link) {

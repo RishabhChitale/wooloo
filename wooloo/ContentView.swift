@@ -537,7 +537,7 @@ private struct DestinationContentView: View {
                 .help("New Space")
                 .disabled(!herdr.isConnected)
                 if showsTheme {
-                    ThemeButton().padding(.leading, 6)
+                    ThemeButton().padding(.leading, 3)
                 }
             }
     }
@@ -1028,6 +1028,21 @@ private struct DestinationContentView: View {
         }
     }
 
+    /// The pane header's split, maximize and close buttons; only for panes Herdr runs on this Mac.
+    private var paneActionHandler: ((String, String) -> Void)? {
+        guard theme.isPixel, herdr.machine == nil else { return nil }
+        return { action, id in
+            herdr.select(paneID: id)
+            switch action {
+            case "split-right": herdr.splitPane("right")
+            case "split-down": herdr.splitPane("down")
+            case "zoom": herdr.zoomPane()
+            case "close": herdr.closePane(id)
+            default: break
+            }
+        }
+    }
+
     /// Titles for the Ame theme's pane headers: the agent's name and detail, or "Shell" and the folder.
     private var paneHeaders: [String: TerminalPaneHeader] {
         var agents: [String: HerdrAgent] = [:]
@@ -1058,6 +1073,7 @@ private struct DestinationContentView: View {
                     paneID: herdr.selectedPaneID ?? selectedPanes[0].paneID,
                     surfaceFeed: herdr.surfaceFeed,
                     paneHeaders: paneHeaders,
+                    paneAction: paneActionHandler,
                     onPresentSurface: { herdr.acknowledgeAgentSurface($0) },
                     sendPopupInput: { event, id, boot in herdr.sendPopupInput(event, terminalID: id, bootID: boot) },
                     closePopup: { id, boot in herdr.closePopup(terminalID: id, bootID: boot) },
@@ -2010,8 +2026,12 @@ private struct DestinationContentView: View {
             Text(title)
                 .font(theme.chromeFont(typography.secondary, weight: .semibold))
                 .tracking(0.7)
-            Image(systemName: icon)
-                .font(.system(size: typography.secondary))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            if !theme.isPixel {
+                Image(systemName: icon)
+                    .font(.system(size: typography.secondary))
+            }
         }
         .foregroundStyle(tint ?? Color.secondary)
         .padding(.horizontal, 8)
