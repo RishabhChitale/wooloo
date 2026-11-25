@@ -10,6 +10,8 @@ import sys
 
 
 MACOS_JOB = "macOS build and test"
+# runner labels the release gate trusts: arm64 macos-26, and macos-15-intel while arm64 capacity is short
+MACOS_LABELS = ("macos-26", "macos-15-intel")
 # the fork's sync workflow starts CI with workflow_dispatch, since GITHUB_TOKEN pushes start no workflows
 RELEASE_EVENTS = ("push", "workflow_dispatch")
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -98,7 +100,7 @@ def release_ci_succeeded(repository, sha):
         )
         for job in jobs:
             if (job.get("name") == MACOS_JOB and job.get("status") == "completed"
-                    and job.get("conclusion") == "success" and "macos-26" in job.get("labels", [])):
+                    and job.get("conclusion") == "success" and any(label in job.get("labels", []) for label in MACOS_LABELS)):
                 steps = job.get("steps", [])
                 if all(any(step.get("name") == name and step.get("conclusion") == "success"
                            and step.get("status") == "completed" for step in steps)
