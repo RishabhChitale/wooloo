@@ -149,7 +149,7 @@ private struct DestinationContentView: View {
         if let search { _search = StateObject(wrappedValue: search) }
     }
 
-    private var windowContent: some View {
+    private var windowBody: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 windowHeader
@@ -176,6 +176,10 @@ private struct DestinationContentView: View {
             guard splitWindow.window == nil || splitWindow.window?.isKeyWindow == true else { return }
             splitModeRaw = (splitActive ? SplitMode.Preference.off : SplitMode.Preference.on).rawValue
         }
+    }
+
+    private var windowContent: some View {
+        windowBody
         .preferredColorScheme(theme.colorScheme)
         .environment(\.woolooTheme, theme)
         .environment(\.woolooTypography, textScale)
