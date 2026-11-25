@@ -242,6 +242,8 @@ struct TerminalPaneView: NSViewRepresentable {
     var paneAction: ((String, String) -> Void)? = nil
     /// How far the text is scaled down so a wider mirrored terminal fits (1 = normal size).
     var fitScale: CGFloat = 1
+    /// Split mode: picks the one pane of the live surface to show, cropped out of the whole tab.
+    var splitPane: ((HerdrSurface) -> String?)? = nil
     var onPresentSurface: ((HerdrSurface) -> Void)? = nil
     var sendPopupInput: ((HerdrInputEvent, String, String) -> Void)? = nil
     var closePopup: ((String, String) -> Void)? = nil
@@ -363,6 +365,8 @@ struct TerminalPaneView: NSViewRepresentable {
             view.surfaceRevision = nil
         }
         Self.configureScrolling(scrollView, view: view, live: surfaceFeed != nil)
+        view.splitPane = splitPane
+        Self.configureSplitScrolling(scrollView, view: view, split: splitPane != nil && surfaceFeed != nil)
         if let surfaceFeed {
             // Frames reach the view straight from the feed; SwiftUI only connects them once.
             if view.surfaceFeed !== surfaceFeed {
@@ -427,6 +431,39 @@ struct TerminalPaneView: NSViewRepresentable {
         view.autoresizingMask = live ? [.width, .height] : []
         if live {
             view.setFrameSize(scrollView.contentSize)
+            scrollView.contentView.scroll(to: .zero)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+    }
+
+    /// Split mode shows one pane at the scale the window chose. When even the smallest scale leaves that pane
+    /// wider than the window, the view becomes as wide as the pane and scrolls sideways instead of cutting
+    /// its right edge; otherwise it fills the window as every live surface does.
+    fileprivate static func configureSplitScrolling(_ scrollView: NSScrollView, view: HerdrTerminalTextView, split: Bool) {
+        guard split else {
+            guard view.isSplitScrolling else { return }
+            view.isSplitScrolling = false
+            scrollView.hasHorizontalScroller = false
+            scrollView.horizontalScrollElasticity = .none
+            view.autoresizingMask = [.width, .height]
+            view.setFrameSize(scrollView.contentSize)
+            return
+        }
+        let magnification = max(scrollView.magnification, 0.1)
+        let visibleWidth = scrollView.contentSize.width / magnification
+        let neededWidth = view.splitDocumentWidth
+        if neededWidth > visibleWidth + 0.5 {
+            view.isSplitScrolling = true
+            scrollView.hasHorizontalScroller = true
+            scrollView.horizontalScrollElasticity = .automatic
+            view.autoresizingMask = [.height]
+            view.setFrameSize(NSSize(width: neededWidth, height: scrollView.contentSize.height / magnification))
+        } else if view.isSplitScrolling {
+            view.isSplitScrolling = false
+            scrollView.hasHorizontalScroller = false
+            scrollView.horizontalScrollElasticity = .none
+            view.autoresizingMask = [.width, .height]
+            view.setFrameSize(NSSize(width: visibleWidth, height: scrollView.contentSize.height / magnification))
             scrollView.contentView.scroll(to: .zero)
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
@@ -1219,6 +1256,25 @@ final class HerdrTerminalTextView: NSTextView {
     var themeID: String?
     var theme = WoolooTheme.named(WoolooTheme.fallbackID)!
     var surfaceFeed: HerdrSurfaceFeed?
+    /// Split mode: names the one pane of each surface to show, cropped out of the whole tab. Nil shows everything.
+    var splitPane: ((HerdrSurface) -> String?)? {
+        didSet {
+            guard (splitPane == nil) != (oldValue == nil) else { return }
+            surfaceRevision = nil
+            terminalGrid = nil
+            clearTerminalSelection()
+            if let rawSurface { show(rawSurface) }
+        }
+    }
+    /// The surface as the feed delivered it, before any Split mode crop.
+    private var rawSurface: HerdrSurface?
+    /// The width the shown pane needs at normal text size, with the view's side margins.
+    var splitDocumentWidth: CGFloat {
+        guard let surface else { return 0 }
+        return textContainerInset.width * 2 + CGFloat(surface.width) * TerminalPaneView.cellWidth
+    }
+    /// Whether the document is wider than the viewport in Split mode, which scrolls sideways then.
+    var isSplitScrolling = false
     var onPresentSurface: ((HerdrSurface) -> Void)?
     private var keyWindowObserver: NSObjectProtocol?
     /// With metrics on, records the screen's refreshes so a draw's time on screen can be estimated.
@@ -1647,8 +1703,11 @@ final class HerdrTerminalTextView: NSTextView {
     }
 
     /// Shows a live surface, laying the grid out again only when its content changed.
-    func show(_ surface: HerdrSurface?) {
-        guard let surface else {
+    func show(_ incoming: HerdrSurface?) {
+        rawSurface = incoming
+        var shown = incoming
+        if let incoming, let splitPane, let id = splitPane(incoming), let crop = incoming.cropped(to: id) { shown = crop }
+        guard let surface = shown else {
             self.surface = nil
             displaySurface = nil
             terminalGrid = nil
@@ -1695,6 +1754,9 @@ final class HerdrTerminalTextView: NSTextView {
         }
         let layoutNanos = TerminalPipelineMetrics.now() - layoutStart
         applySurfaceGrid(grid)
+        if splitPane != nil, let scrollView = enclosingScrollView {
+            TerminalPaneView.configureSplitScrolling(scrollView, view: self, split: true)
+        }
         if popupChanged { needsDisplay = true }
         if hoveredLink != nil { updateHoveredLink() }
         TerminalPipelineMetrics.shared?.updated(revision: surface.revision, start: start, layoutNanos: layoutNanos)

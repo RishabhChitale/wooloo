@@ -1908,23 +1908,87 @@ final class HerdrStore: ObservableObject {
 
     /// The window tells the store how much room the live surface has. A new size starts again from normal
     /// text size, and the surface that answers decides whether it has to shrink.
-    func setSurfaceViewport(_ size: CGSize) {
+    func setSurfaceViewport(_ size: CGSize, split: Bool = false) {
         guard size.width > 0, size.height > 0 else { return }
-        if size != fitViewport { fitScale = 1 }
+        if size != fitViewport || split != splitFit { fitScale = 1 }
         fitViewport = size
+        splitFit = split
         sendViewportSize()
     }
 
-    private func sendViewportSize() {
+    /// Split mode: the window shows only one pane of the surface (the commander), so the surface is
+    /// asked for enough columns that this pane, not the whole tab, fills the viewport.
+    private(set) var splitFit = false
+
+    /// The pane Split mode shows: the agent whose name starts with "commander" (not
+    /// "second-commander"), else the leftmost, topmost pane; nil without a surface.
+    func splitPaneID(in surface: HerdrSurface?) -> String? {
+        guard let surface, !surface.paneIDs.isEmpty else { return nil }
+        if surface.paneIDs.count == 1 { return surface.paneIDs[0] }
+        for agent in snapshot?.agents ?? [] where surface.paneIDs.contains(agent.paneID) {
+            for value in [agent.name, agent.displayAgent, agent.title] {
+                if let value, value.lowercased().hasPrefix("commander") { return agent.paneID }
+            }
+        }
+        let placed: [(id: String, x: Int, y: Int)] = surface.paneIDs.compactMap { id in
+            surface.paneRects[id].map { (id: id, x: $0.x, y: $0.y) }
+        }
+        return placed.min { ($0.x, $0.y) < ($1.x, $1.y) }?.id ?? surface.paneIDs.first
+    }
+
+    /// Focuses the Split mode pane so typing goes to it, whatever pane the PC had focused.
+    private func focusSplitPane(_ surface: HerdrSurface) {
+        guard splitFit, let id = splitPaneID(in: surface), selectedPaneID != id,
+              requestedFocusPaneID != id else { return }
+        select(paneID: id)
+    }
+
+    /// What share of the surface the Split mode pane covers (width, height), 1 when unknown.
+    private func splitShare(of surface: HerdrSurface?) -> (width: Double, height: Double) {
+        guard let surface, surface.width > 0, surface.height > 0, let id = splitPaneID(in: surface),
+              let rect = surface.paneRects[id] else { return (1, 1) }
+        return (max(0.2, Double(rect.width) / Double(surface.width)), max(0.2, Double(rect.height) / Double(surface.height)))
+    }
+
+    private func sendViewportSize(tolerant: Bool = false) {
         let cell = CGSize(width: TerminalPaneView.cellWidth * fitScale, height: TerminalPaneView.cellHeight * fitScale)
-        let cols = max(1, Int((fitViewport.width - 20) / cell.width))
-        let rows = max(1, Int((fitViewport.height - 18) / cell.height))
+        var cols = max(1, Int((fitViewport.width - 20) / cell.width))
+        var rows = max(1, Int((fitViewport.height - 18) / cell.height))
+        if splitFit {
+            // The commander pane gets its share of the columns, so ask for the whole tab's worth, keeping a
+            // couple of columns spare so rounding never makes the pane a column wider than the viewport.
+            let share = splitShare(of: surface)
+            cols = min(1000, max(1, Int(Double(max(1, cols - 2)) / share.width)))
+            rows = min(1000, max(1, Int(Double(rows) / share.height)))
+            // Follow-up requests ignore a column or two of drift, so rounding cannot keep resizing the PC terminal.
+            if tolerant, surfaceCols > 0, abs(cols - surfaceCols) <= 2, abs(rows - surfaceRows) <= 1,
+               self.cellWidth == Int(cell.width.rounded()), self.cellHeight == Int(cell.height.rounded()) { return }
+        }
         resizeSurface(cols: cols, rows: rows, cellWidth: Int(cell.width.rounded()), cellHeight: Int(cell.height.rounded()))
+    }
+
+    /// Split mode's version of the fit: the commander pane alone must fit the viewport.
+    private func fitScaleToSplitPane(_ surface: HerdrSurface) {
+        guard let id = splitPaneID(in: surface), let rect = surface.paneRects[id] else { return }
+        let cellWidth = TerminalPaneView.cellWidth
+        let usable = fitViewport.width - 20
+        let askedColumns = Int(usable / (cellWidth * fitScale))
+        if rect.width > askedColumns + 2 {
+            let wanted = CGFloat(rect.width + 1) * cellWidth
+            let needed = max(Self.fitFloor, min(1, usable / wanted))
+            if needed < fitScale - 0.004 { fitScale = needed }
+        }
+        sendViewportSize(tolerant: true)
     }
 
     /// Shrinks the text when the surface Herdr sent is wider than the columns the window asked for.
     private func fitScaleToSurface(_ surface: HerdrSurface?) {
         guard let surface, fitViewport.width > 0 else { return }
+        if splitFit {
+            focusSplitPane(surface)
+            fitScaleToSplitPane(surface)
+            return
+        }
         let cellWidth = TerminalPaneView.cellWidth
         let usable = fitViewport.width - 20
         let askedColumns = Int(usable / (cellWidth * fitScale))

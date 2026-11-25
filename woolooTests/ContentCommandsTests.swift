@@ -786,3 +786,47 @@ final class ContentCommandsTests: XCTestCase {
         XCTAssertFalse(LeftSidebarPreference.isVisible(defaults: defaults))
     }
 }
+
+final class SplitModeTests: XCTestCase {
+    func testAutoEngagesBelowNarrowWidthOrAtHalfScreen() {
+        XCTAssertTrue(SplitMode.autoEngaged(current: false, windowWidth: 880, screenWidth: 1512))
+        XCTAssertTrue(SplitMode.autoEngaged(current: false, windowWidth: 1280, screenWidth: 2560))
+        XCTAssertFalse(SplitMode.autoEngaged(current: false, windowWidth: 1200, screenWidth: 1512))
+    }
+
+    func testAutoHasHysteresis() {
+        // Engaged windows stay compact until clearly larger again.
+        XCTAssertTrue(SplitMode.autoEngaged(current: true, windowWidth: 920, screenWidth: 1512))
+        XCTAssertFalse(SplitMode.autoEngaged(current: true, windowWidth: 1100, screenWidth: 1512))
+        XCTAssertTrue(SplitMode.autoEngaged(current: true, windowWidth: 1100, screenWidth: 2560))
+    }
+
+    func testPreferenceOverridesAuto() {
+        XCTAssertTrue(SplitMode.Preference.on.isActive(auto: false))
+        XCTAssertFalse(SplitMode.Preference.off.isActive(auto: true))
+        XCTAssertTrue(SplitMode.Preference.auto.isActive(auto: true))
+        XCTAssertFalse(SplitMode.Preference.auto.isActive(auto: false))
+    }
+
+    func testCropKeepsOnlyOnePane() {
+        let width = 10, height = 4
+        let cells = (0..<(width * height)).map { index in
+            HerdrCell(symbol: String(index % 10), foreground: 0, background: 0, modifier: 0, skip: false)
+        }
+        let left = HerdrRect(x: 0, y: 0, width: 6, height: 4)
+        let right = HerdrRect(x: 6, y: 0, width: 4, height: 4)
+        let surface = HerdrSurface(bootID: "b", projectionRevision: 1, revision: 2, width: width, height: height,
+                                   cells: cells, cursor: HerdrCursor(x: 7, y: 1, visible: true, shape: 0),
+                                   paneIDs: ["a", "b"], paneRects: ["a": left, "b": right],
+                                   paneInnerRects: ["a": left, "b": right], mouseReportingPaneIDs: [],
+                                   splits: [], graphics: [])
+        let cropped = surface.cropped(to: "b")
+        XCTAssertEqual(cropped?.width, 4)
+        XCTAssertEqual(cropped?.height, 4)
+        XCTAssertEqual(cropped?.paneIDs, ["b"])
+        XCTAssertEqual(cropped?.paneRects["b"], HerdrRect(x: 0, y: 0, width: 4, height: 4))
+        XCTAssertEqual(cropped?.cells[0, 0].symbol, "6")
+        XCTAssertEqual(cropped?.cursor?.x, 1)
+        XCTAssertNil(surface.cropped(to: "missing"))
+    }
+}

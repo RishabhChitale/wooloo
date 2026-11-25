@@ -548,6 +548,8 @@ struct HerdrDestinationSection: View {
     let active: Bool
     let grouped: Bool
     var hiddenLabels: Set<String> = []
+    /// Split mode's narrow Spaces column: tighter rows, no Git counts, pills or connection menu.
+    var compact = false
     var manage: () -> Void = {}
     var remove: () -> Void = {}
     let select: (String) -> Void
@@ -597,13 +599,15 @@ struct HerdrDestinationSection: View {
                     Button(action: create) { Image(systemName: "plus") }
                         .buttonStyle(.plain).disabled(!store.isConnected)
                         .help("New Space on \(store.machine?.label ?? "Local") · \(store.sessionName)")
-                    Menu {
-                        Button("Connections…", action: manage)
-                        Button("Remove from This Window", systemImage: "xmark", action: remove)
-                    } label: { Image(systemName: "ellipsis") }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .help("Connection actions")
+                    if !compact {
+                        Menu {
+                            Button("Connections…", action: manage)
+                            Button("Remove from This Window", systemImage: "xmark", action: remove)
+                        } label: { Image(systemName: "ellipsis") }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                        .help("Connection actions")
+                    }
                 }
                 .font(.system(size: typography.secondary, weight: .medium))
                 .padding(.vertical, 4)
@@ -727,11 +731,11 @@ struct HerdrDestinationSection: View {
         let pills = pillSummary(for: space)
         Button { select(space.workspaceID) } label: {
             VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 7) {
+            HStack(spacing: compact ? 5 : 7) {
                 AgentStatusDot(status: space.agentStatus)
-                Text(space.label).lineLimit(1)
+                Text(space.label).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 0)
-                if let git = store.workspaceGitStatuses[space.workspaceID] {
+                if !compact, let git = store.workspaceGitStatuses[space.workspaceID] {
                     HStack(spacing: 4) {
                         if git.ahead > 0 { Text("↑\(git.ahead)") }
                         if git.behind > 0 { Text("↓\(git.behind)") }
@@ -745,8 +749,8 @@ struct HerdrDestinationSection: View {
                     HerdrAttentionBadge(requests: marks.requests, done: marks.done)
                 }
             }
-            if pills.isUnitSpace, pills.hasPills { SpacePillsView(summary: pills) }
-            if theme.isPixel {
+            if !compact, pills.isUnitSpace, pills.hasPills { SpacePillsView(summary: pills) }
+            if theme.isPixel, !compact {
                 let unfinished = unfinishedAgents(in: space)
                 if unfinished > 0 {
                     Text("unfinished \(unfinished)")
@@ -757,7 +761,8 @@ struct HerdrDestinationSection: View {
             }
             }
             .font(theme.chromeFont(typography.emphasis, weight: .medium))
-            .sidebarRow(selected: active && store.selectedWorkspaceID == space.workspaceID)
+            .sidebarRow(selected: active && store.selectedWorkspaceID == space.workspaceID,
+                        height: compact ? 22 : 27, horizontal: compact ? 5 : 8)
             .overlay(alignment: .bottom) {
                 if pills.working > 0 { SpaceProgressBar(percent: pills.workingPercent).padding(.horizontal, 8).padding(.bottom, 1) }
             }

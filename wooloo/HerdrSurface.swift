@@ -1276,3 +1276,42 @@ final class HerdrSurfaceStream: @unchecked Sendable {
         }
     }
 }
+
+extension HerdrSurface {
+    /// Only `paneID`'s rectangle of this surface, for Split mode: cells, cursor, graphics and pane
+    /// rectangles are shifted so the pane starts at the top left, and the other panes and the
+    /// splits between them are dropped. Pane-relative mouse positions stay valid because they are
+    /// measured from the pane's own inner rectangle. Nil when the pane is not on the surface.
+    func cropped(to paneID: String) -> HerdrSurface? {
+        guard let rect = paneRects[paneID], rect.width > 0, rect.height > 0,
+              rect.x >= 0, rect.y >= 0, rect.x + rect.width <= width, rect.y + rect.height <= height,
+              cells.count == width * height else { return nil }
+        func shifted(_ other: HerdrRect) -> HerdrRect {
+            HerdrRect(x: other.x - rect.x, y: other.y - rect.y, width: other.width, height: other.height)
+        }
+        let rows: [[HerdrCell]] = (rect.y..<(rect.y + rect.height)).map { y in
+            Array(cells.row(y)[rect.x..<(rect.x + rect.width)])
+        }
+        var shiftedCursor: HerdrCursor?
+        if let cursor, cursor.x >= rect.x, cursor.x < rect.x + rect.width,
+           cursor.y >= rect.y, cursor.y < rect.y + rect.height {
+            shiftedCursor = HerdrCursor(x: cursor.x - rect.x, y: cursor.y - rect.y, visible: cursor.visible, shape: cursor.shape)
+        }
+        let shiftedGraphics: [HerdrGraphic] = graphics.compactMap { graphic in
+            guard graphic.x >= rect.x, graphic.x < rect.x + rect.width,
+                  graphic.y >= rect.y, graphic.y < rect.y + rect.height else { return nil }
+            return HerdrGraphic(key: graphic.key, data: graphic.data, x: graphic.x - rect.x, y: graphic.y - rect.y,
+                                cols: graphic.cols, rows: graphic.rows, sourceX: graphic.sourceX, sourceY: graphic.sourceY,
+                                sourceWidth: graphic.sourceWidth, sourceHeight: graphic.sourceHeight,
+                                xOffset: graphic.xOffset, yOffset: graphic.yOffset, z: graphic.z)
+        }
+        var innerRects: [String: HerdrRect] = [:]
+        if let inner = paneInnerRects[paneID] { innerRects[paneID] = shifted(inner) }
+        return HerdrSurface(bootID: bootID, projectionRevision: projectionRevision, revision: revision,
+                            width: rect.width, height: rect.height,
+                            cells: HerdrCellRows(rows: rows, width: rect.width), cursor: shiftedCursor,
+                            paneIDs: [paneID], paneRects: [paneID: shifted(rect)], paneInnerRects: innerRects,
+                            mouseReportingPaneIDs: mouseReportingPaneIDs.intersection([paneID]), splits: [],
+                            graphics: shiftedGraphics, hyperlinks: hyperlinks, popup: popup, focusedPaneID: paneID)
+    }
+}

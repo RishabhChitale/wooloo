@@ -74,6 +74,16 @@ private struct DestinationContentView: View {
     private var workspaceContext: WorkspaceContext { WorkspaceContext(store: herdr) }
     private var explorerLocation: WorkspaceFileLocation? { workspaceContext.location }
     @AppStorage("SidebarWidth") private var sidebarWidth = 206.0
+    /// Split mode (a compact layout for half-screen windows): "auto" follows the window, "on" and "off" force it.
+    /// The layout it takes over is a transient override; the stored sidebar and rail preferences stay as they were.
+    @AppStorage(SplitMode.defaultsKey) private var splitModeRaw = SplitMode.Preference.auto.rawValue
+    @State private var autoSplit = false
+    @State private var splitWindow = SplitWindowBox()
+    private var splitActive: Bool {
+        SplitMode.Preference(rawValue: splitModeRaw).map { $0.isActive(auto: autoSplit) } ?? autoSplit
+    }
+    /// The Spaces column's width in Split mode.
+    private static let splitSidebarWidth = 150.0
     @AppStorage("FilesSidebarWidth") private var filesSidebarWidth = 244.0
     @AppStorage("FilesSidebarWidthBeforeNarrow") private var filesSidebarWidthBeforeNarrow = 244.0
     @AppStorage("AgentsInSelectedSpaceOnly") private var agentsInSelectedSpaceOnly = false
@@ -151,7 +161,21 @@ private struct DestinationContentView: View {
             }
         }
         .ignoresSafeArea(.container, edges: .top)
-        .frame(minWidth: 850, minHeight: managesRuntime && runtime.showsSetup ? 580 : 380)
+        // Split mode lets the window go narrow enough to tile beside another app; Off keeps the usual minimum.
+        .frame(minWidth: splitModeRaw == SplitMode.Preference.off.rawValue ? 850 : SplitMode.minimumWidth,
+               minHeight: managesRuntime && runtime.showsSetup ? 580 : 380)
+        .background {
+            SplitModeObserver(box: splitWindow) { width, screenWidth in
+                let engaged = SplitMode.autoEngaged(current: autoSplit, windowWidth: width, screenWidth: screenWidth)
+                if engaged != autoSplit { autoSplit = engaged }
+            }
+            .frame(width: 0, height: 0)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleSplitMode)) { _ in
+            // Every window hears the menu item; only the one in front acts on it.
+            guard splitWindow.window == nil || splitWindow.window?.isKeyWindow == true else { return }
+            splitModeRaw = (splitActive ? SplitMode.Preference.off : SplitMode.Preference.on).rawValue
+        }
         .preferredColorScheme(theme.colorScheme)
         .environment(\.woolooTheme, theme)
         .environment(\.woolooTypography, textScale)
@@ -372,13 +396,17 @@ private struct DestinationContentView: View {
     private func content(totalWidth: CGFloat) -> some View {
         // Keep the terminal area usable however wide the sidebars are dragged.
         let mainMinimum = 360.0
-        let left = window.showsSidebar ? sidebarWidth : 0
-        let right = window.showsFilesSidebar ? filesSidebarWidth : 0
-        return contentColumns(totalWidth: totalWidth, left: left, right: right, mainMinimum: mainMinimum)
+        let split = splitActive
+        let left = split ? 0 : (window.showsSidebar ? sidebarWidth : 0)
+        let right = split ? Self.splitSidebarWidth : (window.showsFilesSidebar ? filesSidebarWidth : 0)
+        return contentColumns(totalWidth: totalWidth, left: left, right: right, mainMinimum: split ? 200 : mainMinimum)
             .onReceive(NotificationCenter.default.publisher(for: .fitPCPanes)) { _ in
+                // Split mode sizes everything itself; Fit and Narrow would only change the saved widths.
+                guard !splitActive else { return }
                 fitSidebarForPCPanes(totalWidth: totalWidth, left: left)
             }
             .onReceive(NotificationCenter.default.publisher(for: .narrowSpacesSidebar)) { _ in
+                guard !splitActive else { return }
                 narrowOrRestoreSpacesSidebar()
             }
     }
@@ -404,13 +432,16 @@ private struct DestinationContentView: View {
 
     private func contentColumns(totalWidth: CGFloat, left: Double, right: Double, mainMinimum: Double) -> some View {
         HStack(spacing: 0) {
-            if window.showsSidebar {
+            if window.showsSidebar && !splitActive {
                 sidebar.frame(width: sidebarWidth)
                 SidebarResizeHandle(width: $sidebarWidth, defaultWidth: 206, edge: .leading,
                                     range: 160...max(160, min(420, totalWidth - right - mainMinimum)))
             }
             mainArea
-            if window.showsFilesSidebar && destinations.canAccessActiveDestination {
+            if splitActive && destinations.canAccessActiveDestination {
+                Divider()
+                splitSpacesColumn.frame(width: Self.splitSidebarWidth)
+            } else if window.showsFilesSidebar && destinations.canAccessActiveDestination {
                 SidebarResizeHandle(width: $filesSidebarWidth, defaultWidth: 244, edge: .trailing,
                                     range: 130...max(130, min(560, totalWidth - left - mainMinimum)))
                 VStack(spacing: 0) {
@@ -588,13 +619,14 @@ private struct DestinationContentView: View {
         return labels
     }
 
-    private var spacesList: some View {
+    private func spacesList(compact: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             ForEach(destinations.stores, id: \.contextID) { store in
                 HerdrDestinationSection(store: store, notifier: notifier,
                     spaceDrag: window.spaceDrag, tabDrag: window.tabDrag,
                     active: store === herdr, grouped: true,
                     hiddenLabels: duplicateLabels(for: store),
+                    compact: compact,
                     manage: { window.showsSessionPicker = true },
                     remove: { Task { await removeConnection(store) } },
                     select: { destinations.select(store, workspaceID: $0) },
@@ -617,8 +649,38 @@ private struct DestinationContentView: View {
     private func spacesSection(spacesToggle: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             spacesHeader(spacesToggle: spacesToggle)
-            spacesList
+            spacesList()
         }
+    }
+
+    /// Split mode's Spaces column: just the list, narrow and tight, under a header with New Space.
+    private var splitSpacesColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                sectionTitle("SPACES", icon: "square.stack")
+                Spacer(minLength: 0)
+                Button {
+                    activeDocumentID = nil
+                    destinations.createSpace(on: herdr)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: typography.secondary, weight: .semibold))
+                        .frame(width: 23, height: typography.metric(20))
+                }
+                .buttonStyle(.plain)
+                .help("New Space")
+                .disabled(!herdr.isConnected)
+            }
+            .padding(.horizontal, 5)
+            .padding(.top, 7)
+            .padding(.bottom, 3)
+            ScrollView {
+                spacesList(compact: true)
+                    .padding(.horizontal, 3)
+                    .padding(.bottom, 7)
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     /// The Spaces list on top of the right sidebar, so Spaces stay reachable with the left sidebar
@@ -626,7 +688,7 @@ private struct DestinationContentView: View {
     @ViewBuilder
     private var filesSidebarSpaces: some View {
         let scroll = ScrollView {
-            spacesList
+            spacesList()
                 .padding(.horizontal, 7)
                 .padding(.bottom, 7)
                 .background {
@@ -1130,6 +1192,7 @@ private struct DestinationContentView: View {
                     paneHeaders: paneHeaders,
                     paneAction: paneActionHandler,
                     fitScale: herdr.fitScale,
+                    splitPane: splitActive ? { [weak herdr] surface in herdr?.splitPaneID(in: surface) } : nil,
                     onPresentSurface: { herdr.acknowledgeAgentSurface($0) },
                     sendPopupInput: { event, id, boot in herdr.sendPopupInput(event, terminalID: id, bootID: boot) },
                     closePopup: { id, boot in herdr.closePopup(terminalID: id, bootID: boot) },
@@ -1148,6 +1211,7 @@ private struct DestinationContentView: View {
                 )
                 .onAppear { resizeSurface(to: geometry.size) }
                 .onChange(of: geometry.size) { _, size in resizeSurface(to: size) }
+                .onChange(of: splitActive) { _, _ in resizeSurface(to: geometry.size) }
             }
         } else if let layout = herdr.snapshot?.layouts.first(where: { $0.tabID == herdr.selectedTabID }),
            !layout.panes.isEmpty {
@@ -1291,7 +1355,7 @@ private struct DestinationContentView: View {
     private var windowHeader: some View {
         HStack(spacing: 0) {
             WindowDragRegion()
-                .frame(width: max(chrome.metrics.controlsWidth, window.showsSidebar ? sidebarWidth + 1 : 0))
+                .frame(width: max(chrome.metrics.controlsWidth, window.showsSidebar && !splitActive ? sidebarWidth + 1 : 0))
             if managesRuntime && runtime.showsSetup {
                 WindowDragRegion()
             } else {
@@ -1299,10 +1363,31 @@ private struct DestinationContentView: View {
             }
             // Always keep somewhere to grab the window, even when the tabs overflow.
             WindowDragRegion().frame(width: 44)
+            if !(managesRuntime && runtime.showsSetup) {
+                splitModeButton
+            }
         }
         .frame(height: max(textScale.metric(30), chrome.metrics.minimumHeight))
         .background(barBackground)
         .overlay(alignment: .bottom) { (theme.isPixel ? theme.ameBorderColor : Color.primary.opacity(0.08)).frame(height: 1) }
+    }
+
+    /// Top right of the window: switches Split mode on or off (the View menu also offers Auto).
+    private var splitModeButton: some View {
+        let preference = SplitMode.Preference(rawValue: splitModeRaw) ?? .auto
+        return Button {
+            splitModeRaw = (splitActive ? SplitMode.Preference.off : SplitMode.Preference.on).rawValue
+        } label: {
+            Image(systemName: splitActive ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
+                .font(.system(size: typography.secondary + 1, weight: .medium))
+                .foregroundStyle(splitActive ? theme.accent : Color.secondary)
+                .frame(width: 28, height: typography.metric(24))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 6)
+        .help("Split mode (\(preference.title)\(preference == .auto && splitActive ? ", on now" : "")). Shows just the commander terminal and the Spaces list. Click to turn it \(splitActive ? "off" : "on"); View > Split Mode has Auto.")
+        .accessibilityIdentifier("toggle-split-mode")
     }
 
     private var focusedTabID: String? { commands.focusedTabID }
@@ -2006,7 +2091,7 @@ private struct DestinationContentView: View {
 
     private func resizeSurface(to size: CGSize) {
         // The store picks the columns: it shrinks the text when a mirrored PC terminal is wider than this area.
-        herdr.setSurfaceViewport(size)
+        herdr.setSurfaceViewport(size, split: splitActive)
     }
 
     /// Shown until the session connects. A stopped server can be started from here.
@@ -2160,8 +2245,8 @@ private struct DestinationContentView: View {
 }
 
 extension View {
-    func sidebarRow(selected: Bool, height: CGFloat = 27) -> some View {
-        modifier(SidebarRowModifier(selected: selected, height: height))
+    func sidebarRow(selected: Bool, height: CGFloat = 27, horizontal: CGFloat = 8) -> some View {
+        modifier(SidebarRowModifier(selected: selected, height: height, horizontal: horizontal))
     }
 }
 
@@ -2171,10 +2256,11 @@ private struct SidebarRowModifier: ViewModifier {
     let selected: Bool
     /// Height at 11 pt text; grows with the interface text size.
     let height: CGFloat
+    var horizontal: CGFloat = 8
 
     func body(content: Content) -> some View {
         content
-            .padding(.horizontal, 8)
+            .padding(.horizontal, horizontal)
             .frame(minHeight: typography.metric(height))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
@@ -2382,5 +2468,104 @@ private struct TerminalHostObserver: View {
             .onChange(of: activeState) { _, state in
                 store.updateTerminalHost(theme: theme, focused: state == .key)
             }
+    }
+}
+
+/// Split mode: a compact layout for a window tiled beside another app, which squashes the usual
+/// three columns. It shows only the commander terminal and a narrow Spaces list.
+enum SplitMode {
+    /// UserDefaults key (in the app's own domain) holding a `Preference` raw value.
+    static let defaultsKey = "splitMode"
+    /// How narrow the window may get while Split mode is allowed.
+    static let minimumWidth: CGFloat = 420
+
+    enum Preference: String, CaseIterable {
+        case auto, on, off
+
+        var title: String {
+            switch self {
+            case .auto: "Auto"
+            case .on: "On"
+            case .off: "Off"
+            }
+        }
+
+        func isActive(auto: Bool) -> Bool {
+            switch self {
+            case .auto: auto
+            case .on: true
+            case .off: false
+            }
+        }
+    }
+
+    /// Auto mode engages below this window width, or when the window covers about half its screen.
+    static let engageWidth: CGFloat = 900
+    static let engageScreenShare: CGFloat = 0.55
+    /// ...and lets go only once the window is clearly bigger again, so it does not flicker at the edge.
+    static let releaseWidth: CGFloat = 960
+    static let releaseScreenShare: CGFloat = 0.6
+
+    static func autoEngaged(current: Bool, windowWidth: CGFloat, screenWidth: CGFloat) -> Bool {
+        let share = screenWidth > 0 ? windowWidth / screenWidth : 1
+        if current { return !(windowWidth >= releaseWidth && share > releaseScreenShare) }
+        return windowWidth < engageWidth || share <= engageScreenShare
+    }
+}
+
+extension Notification.Name {
+    /// Turns Split mode on or off in the front window (View > Toggle Split Mode).
+    static let toggleSplitMode = Notification.Name("wooloo.toggleSplitMode")
+}
+
+/// The window a ContentView lives in, for the menu item to find out whether it is the one in front.
+final class SplitWindowBox {
+    weak var window: NSWindow?
+}
+
+/// Reports the window's width and its screen's usable width whenever either changes.
+struct SplitModeObserver: NSViewRepresentable {
+    let box: SplitWindowBox
+    let onChange: (_ windowWidth: CGFloat, _ screenWidth: CGFloat) -> Void
+
+    func makeNSView(context: Context) -> ObserverView { ObserverView() }
+
+    func updateNSView(_ view: ObserverView, context: Context) {
+        view.box = box
+        view.onChange = onChange
+        view.report()
+    }
+
+    static func dismantleNSView(_ view: ObserverView, coordinator: ()) { view.stopObserving() }
+
+    final class ObserverView: NSView {
+        var box: SplitWindowBox?
+        var onChange: ((CGFloat, CGFloat) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            stopObserving()
+            guard let window else { return }
+            box?.window = window
+            for name in [NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification,
+                         NSWindow.didChangeScreenNotification, NSWindow.didEnterFullScreenNotification,
+                         NSWindow.didExitFullScreenNotification] {
+                NotificationCenter.default.addObserver(self, selector: #selector(windowChanged), name: name, object: window)
+            }
+            DispatchQueue.main.async { [weak self] in self?.report() }
+        }
+
+        func stopObserving() { NotificationCenter.default.removeObserver(self) }
+
+        @objc private func windowChanged(_ note: Notification) {
+            // Resize notifications arrive while SwiftUI is laying out; state changes wait for the next turn.
+            DispatchQueue.main.async { [weak self] in self?.report() }
+        }
+
+        func report() {
+            guard let window else { return }
+            box?.window = window
+            let screenWidth = window.screen?.visibleFrame.width ?? 0
+            onChange?(window.frame.width, screenWidth)
+        }
     }
 }

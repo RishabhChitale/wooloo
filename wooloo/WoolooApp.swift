@@ -52,6 +52,7 @@ private struct WoolooCommands: Commands {
     @AppStorage("filesSidebarShowsExplorer") private var showsExplorer = false
     @AppStorage("filesSidebarShowsGitHub") private var showsGitHub = false
     @AppStorage(RightSidebarLayout.spacesOnlyKey) private var spacesOnly = false
+    @AppStorage(SplitMode.defaultsKey) private var splitModeRaw = SplitMode.Preference.auto.rawValue
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
@@ -111,6 +112,17 @@ private struct WoolooCommands: Commands {
                 .keyboardShortcut("0", modifiers: [.command, .option])
             Button("Narrow or Restore Spaces Sidebar") { NotificationCenter.default.post(name: .narrowSpacesSidebar, object: nil) }
                 .keyboardShortcut("9", modifiers: [.command, .option])
+            Button("Toggle Split Mode") { NotificationCenter.default.post(name: .toggleSplitMode, object: nil) }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+            Menu("Split Mode: \((SplitMode.Preference(rawValue: splitModeRaw) ?? .auto).title)") {
+                Picker("Split Mode", selection: $splitModeRaw) {
+                    Text("Auto (follow window size)").tag(SplitMode.Preference.auto.rawValue)
+                    Text("On").tag(SplitMode.Preference.on.rawValue)
+                    Text("Off").tag(SplitMode.Preference.off.rawValue)
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            }
             Divider()
             toggle("toggle_wrap_lines", title: "Wrap Lines", isOn: wrapsLines)
             Divider()
