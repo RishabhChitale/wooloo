@@ -80,12 +80,14 @@ struct HerdrWorkspace: Decodable, Equatable, Identifiable {
     let agentStatus: String?
     let activeTabID: String?
     let worktree: HerdrWorktree?
+    /// The folder's Git branch, sent by a PC's shim (empty when it is not a repository).
+    var branch: String? = nil
 
     var id: String { workspaceID }
 
     enum CodingKeys: String, CodingKey {
         case workspaceID = "workspace_id"
-        case label, worktree
+        case label, worktree, branch
         case agentStatus = "agent_status"
         case activeTabID = "active_tab_id"
     }

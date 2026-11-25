@@ -879,7 +879,7 @@ private struct DestinationContentView: View {
                 Text(herdr.machine?.label ?? "This computer").lineLimit(1)
             }
             .help(herdr.machine?.target ?? "This Mac")
-            FooterBranchLabel(cwd: footerCwd, local: herdr.machine == nil)
+            FooterBranchLabel(cwd: footerCwd, local: herdr.machine == nil, remoteBranch: selectedWorkspace?.branch)
             if let git, git.ahead > 0 || git.behind > 0 {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.triangle.branch")

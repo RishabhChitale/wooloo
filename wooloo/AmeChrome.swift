@@ -163,10 +163,12 @@ struct ThemeButton: View {
     }
 }
 
-/// The footer's branch name: the current branch of the selected pane's folder, for local Spaces only.
+/// The footer's branch name: the current branch of the selected pane's folder for local Spaces,
+/// or the branch the PC's shim reported for a PC Space.
 struct FooterBranchLabel: View {
     let cwd: String?
     let local: Bool
+    var remoteBranch: String? = nil
     @State private var branch: String?
 
     var body: some View {
@@ -178,10 +180,14 @@ struct FooterBranchLabel: View {
                 }
             }
         }
-        .task(id: cwd ?? "") {
+        .task(id: (cwd ?? "") + "|" + (remoteBranch ?? "")) {
             while !Task.isCancelled {
                 var found: String? = nil
-                if local { found = await FooterBranchLabel.lookup(cwd) }
+                if local {
+                    found = await FooterBranchLabel.lookup(cwd)
+                } else if let remoteBranch, !remoteBranch.isEmpty {
+                    found = remoteBranch
+                }
                 if found != branch { branch = found }
                 try? await Task.sleep(nanoseconds: 8_000_000_000)
             }
