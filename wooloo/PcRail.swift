@@ -225,6 +225,7 @@ enum AgentSprites {
 /// A square sprite for an agent card; nothing is drawn (and no space is kept) without a sprite and its art file.
 struct AgentSpriteView: View {
     let agentName: String
+    var alternateKey: String?
     let size: CGFloat
     @State private var image: NSImage?
 
@@ -241,8 +242,10 @@ struct AgentSpriteView: View {
         .task {
             while !Task.isCancelled {
                 let name = agentName.lowercased()
+                let alternate = alternateKey?.lowercased()
                 let loaded = await Task.detached(priority: .utility) { () -> NSImage? in
-                    guard let dex = AgentSprites.load()[name] else { return nil }
+                    let table = AgentSprites.load()
+                    guard let dex = table[name] ?? alternate.flatMap({ table[$0] }) else { return nil }
                     return AgentSprites.image(dex: dex)
                 }.value
                 if image !== loaded { image = loaded }

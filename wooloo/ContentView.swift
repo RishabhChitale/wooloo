@@ -2207,7 +2207,7 @@ private struct DestinationContentView: View {
         let role = AgentCardRole(agent.displayName)
         let working = agent.agentStatus == "working"
         return HStack(spacing: 8) {
-            AgentSpriteView(agentName: agent.displayName, size: 34)
+            AgentSpriteView(agentName: agent.displayName, alternateKey: agent.paneID, size: 34)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {
                     Text(role.title)
