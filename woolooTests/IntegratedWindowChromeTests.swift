@@ -146,6 +146,9 @@ final class IntegratedWindowChromeTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: domain) }
         let state = ContentWindowModel(defaults: defaults)
         state.showsFilesSidebar = false
+        // 850 pt is under the split-mode threshold; this test is about the regular header.
+        UserDefaults.standard.set(SplitMode.Preference.off.rawValue, forKey: SplitMode.defaultsKey)
+        defer { UserDefaults.standard.removeObject(forKey: SplitMode.defaultsKey) }
         let (window, store) = makeWindow(state: state, defaults: defaults)
         defer { window.close(); store.stop() }
         window.setContentSize(NSSize(width: 850, height: 600))
