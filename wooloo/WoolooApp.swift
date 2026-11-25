@@ -105,6 +105,8 @@ private struct WoolooCommands: Commands {
             item("toggle_github", title: showsGitHub ? "Hide GitHub" : "Show GitHub")
             item("toggle_spaces_only", title: spacesOnly ? "Show Ame-chan and JINE" : "Show Spaces Only")
             item("refresh_files")
+            Button("Save Window Screenshot") { SelfShot.saveToDesktop() }
+                .keyboardShortcut("s", modifiers: [.command, .shift, .option])
             Divider()
             toggle("toggle_wrap_lines", title: "Wrap Lines", isOn: wrapsLines)
             Divider()
