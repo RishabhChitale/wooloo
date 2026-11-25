@@ -76,6 +76,12 @@ private struct DestinationContentView: View {
     @AppStorage("SidebarWidth") private var sidebarWidth = 206.0
     @AppStorage("FilesSidebarWidth") private var filesSidebarWidth = 244.0
     @AppStorage("AgentsInSelectedSpaceOnly") private var agentsInSelectedSpaceOnly = false
+
+    /// Pixel themes list only the selected Space's agents (as the Windows rail does) until the person picks a scope.
+    private var scopeAgentsToSpace: Bool {
+        if UserDefaults.standard.object(forKey: "AgentsInSelectedSpaceOnly") == nil { return theme.isPixel }
+        return agentsInSelectedSpaceOnly
+    }
     @AppStorage("AgentsCompact") private var agentsCompact = false
     @State private var followsHerdrAgentView = true
     @AppStorage("filesSidebarShowsExplorer") private var showsExplorer = false
@@ -625,7 +631,7 @@ private struct DestinationContentView: View {
     @ViewBuilder
     private var pixelRailFooter: some View {
         Divider()
-        AgentQuotaSection(machine: explorerMachine).padding(7)
+        pixelUsageSection.padding(7)
         Divider()
         ActiveTasksSection(agents: herdr.snapshot?.agents ?? []).padding(7)
         Divider()
@@ -640,9 +646,25 @@ private struct DestinationContentView: View {
         AgentQuotaSection(machine: explorerMachine).padding(7)
     }
 
+    /// A PC's Claude usage comes from the numbers the PC publishes (no sign-in tokens leave it); the Mac's own
+    /// usage keeps the opt-in quota reader.
+    @ViewBuilder
+    private var pixelUsageSection: some View {
+        if explorerMachine != nil {
+            PcClaudeSection()
+        } else {
+            AgentQuotaSection(machine: explorerMachine)
+        }
+    }
+
+    @ViewBuilder
     private var hostSection: some View {
         let directory: String? = explorerLocation?.machine?.id == explorerMachine?.id ? explorerLocation?.root : nil
-        return HostStatsSection(machine: explorerMachine, directory: directory)
+        if theme.isPixel && explorerMachine != nil {
+            PcHostSection()
+        } else {
+            HostStatsSection(machine: explorerMachine, directory: directory)
+        }
     }
 
     private var sidebar: some View {
@@ -681,26 +703,26 @@ private struct DestinationContentView: View {
                             }
                             if theme.isPixel { agentsCompactToggle }
                             Button {
-                                agentsInSelectedSpaceOnly.toggle()
+                                agentsInSelectedSpaceOnly = !scopeAgentsToSpace
                             } label: {
-                                Image(systemName: agentsInSelectedSpaceOnly
+                                Image(systemName: scopeAgentsToSpace
                                       ? "line.3.horizontal.decrease.circle.fill"
                                       : "line.3.horizontal.decrease.circle")
                                     .font(.system(size: typography.body, weight: .semibold))
-                                    .foregroundStyle(agentsInSelectedSpaceOnly ? theme.accent : .secondary)
+                                    .foregroundStyle(scopeAgentsToSpace ? theme.accent : .secondary)
                                     .frame(width: 23, height: typography.metric(20))
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("agents-space-filter")
-                            .help(agentsInSelectedSpaceOnly ? "Show Agents in All Spaces"
+                            .help(scopeAgentsToSpace ? "Show Agents in All Spaces"
                                                             : "Show Agents in Selected Space Only")
                         }
-                        let agents = herdr.visibleAgents(inSelectedSpaceOnly: agentsInSelectedSpaceOnly,
+                        let agents = herdr.visibleAgents(inSelectedSpaceOnly: scopeAgentsToSpace,
                                                          followHerdrView: followsHerdrAgentView)
                         if agents.isEmpty {
                             Text(followsHerdrAgentView && herdr.agentViewState?.view != nil
-                                 ? (agentsInSelectedSpaceOnly ? "No agents match this view in this Space" : "No agents match this view")
-                                 : (agentsInSelectedSpaceOnly ? "No agents in this Space" : "No agents"))
+                                 ? (scopeAgentsToSpace ? "No agents match this view in this Space" : "No agents match this view")
+                                 : (scopeAgentsToSpace ? "No agents in this Space" : "No agents"))
                                 .font(.system(size: typography.body))
                                 .foregroundStyle(.tertiary)
                                 .padding(.horizontal, 8)
