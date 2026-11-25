@@ -124,6 +124,7 @@ struct HostStatsSection: View {
 /// A sidebar section's collapsing title row, shared by HOST and QUOTAS.
 struct SidebarSectionToggle: View {
     @Environment(\.woolooTypography) private var typography
+    @Environment(\.woolooTheme) private var theme
 
     let title: String
     let systemImage: String
@@ -136,17 +137,28 @@ struct SidebarSectionToggle: View {
             collapsed.toggle()
         } label: {
             HStack(spacing: 8) {
-                Text(title)
-                    .font(.system(size: typography.secondary, weight: .semibold))
-                    .tracking(0.7)
-                Image(systemName: systemImage)
-                    .font(.system(size: typography.secondary))
-                Spacer(minLength: 0)
-                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: typography.caption, weight: .semibold))
-                    .frame(width: 23)
+                if theme.isPixel {
+                    Text("\(collapsed ? theme.ameArrowClosed : theme.ameArrowOpen) \(title)")
+                        .font(theme.chromeFont(typography.secondary, weight: .semibold))
+                        .tracking(0.7)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text(collapsed ? "[+] expand" : "[-] compact")
+                        .font(theme.chromeFont(typography.caption))
+                        .foregroundStyle(theme.muted)
+                } else {
+                    Text(title)
+                        .font(.system(size: typography.secondary, weight: .semibold))
+                        .tracking(0.7)
+                    Image(systemName: systemImage)
+                        .font(.system(size: typography.secondary))
+                    Spacer(minLength: 0)
+                    Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                        .font(.system(size: typography.caption, weight: .semibold))
+                        .frame(width: 23)
+                }
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(theme.isPixel ? theme.accent : Color.secondary)
             .padding(.leading, 8)
             .padding(.vertical, 3)
             .contentShape(Rectangle())

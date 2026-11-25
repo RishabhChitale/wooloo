@@ -721,6 +721,10 @@ private struct DestinationContentView: View {
                     .padding(7)
                 Divider()
                 AgentQuotaSection(machine: explorerMachine).padding(7)
+                if theme.isPixel {
+                    Divider()
+                    ActiveTasksSection(agents: herdr.snapshot?.agents ?? []).padding(7)
+                }
             }
             Divider()
             HStack(spacing: 0) {

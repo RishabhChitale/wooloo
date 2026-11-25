@@ -60,6 +60,7 @@
 		A10000000000000000000048 /* ThemeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000049 /* ThemeSettingsView.swift */; };
 		A10000000000000000000046 /* WoolooTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000047 /* WoolooTheme.swift */; };
 		A1F00000000000000000AE01 /* AmeChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F00000000000000000AE02 /* AmeChrome.swift */; };
+		A1F00000000000000000AF01 /* ActiveTasks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F00000000000000000AF02 /* ActiveTasks.swift */; };
 		A1F00000000000000000AE03 /* PixelFontData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F00000000000000000AE04 /* PixelFontData.swift */; };
 		A10000000000000000000044 /* WorkspaceSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000045 /* WorkspaceSearchView.swift */; };
 		A10000000000000000000052 /* WorkspaceGitBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000053 /* WorkspaceGitBar.swift */; };
@@ -252,6 +253,7 @@
 		A10000000000000000000049 /* ThemeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettingsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000047 /* WoolooTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WoolooTheme.swift; sourceTree = "<group>"; };
 		A1F00000000000000000AE02 /* AmeChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmeChrome.swift; sourceTree = "<group>"; };
+		A1F00000000000000000AF02 /* ActiveTasks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveTasks.swift; sourceTree = "<group>"; };
 		A1F00000000000000000AE04 /* PixelFontData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixelFontData.swift; sourceTree = "<group>"; };
 		A10000000000000000000045 /* WorkspaceSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSearchView.swift; sourceTree = "<group>"; };
 		A10000000000000000000053 /* WorkspaceGitBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGitBar.swift; sourceTree = "<group>"; };
@@ -445,6 +447,7 @@
 				A10000000000000000000049 /* ThemeSettingsView.swift */,
 				A10000000000000000000047 /* WoolooTheme.swift */,
 				A1F00000000000000000AE02 /* AmeChrome.swift */,
+				A1F00000000000000000AF02 /* ActiveTasks.swift */,
 				A1F00000000000000000AE04 /* PixelFontData.swift */,
 				A10000000000000000000045 /* WorkspaceSearchView.swift */,
 				A10000000000000000000053 /* WorkspaceGitBar.swift */,
@@ -768,6 +771,7 @@
 				A10000000000000000000048 /* ThemeSettingsView.swift in Sources */,
 				A10000000000000000000046 /* WoolooTheme.swift in Sources */,
 				A1F00000000000000000AE01 /* AmeChrome.swift in Sources */,
+				A1F00000000000000000AF01 /* ActiveTasks.swift in Sources */,
 				A1F00000000000000000AE03 /* PixelFontData.swift in Sources */,
 				A10000000000000000000044 /* WorkspaceSearchView.swift in Sources */,
 				A10000000000000000000052 /* WorkspaceGitBar.swift in Sources */,
