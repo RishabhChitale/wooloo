@@ -80,7 +80,7 @@ private struct DestinationContentView: View {
 
     /// Pixel themes list only the selected Space's agents (as the Windows rail does) until the person picks a scope.
     private var scopeAgentsToSpace: Bool {
-        if UserDefaults.standard.object(forKey: "AgentsInSelectedSpaceOnly") == nil { return theme.isPixel }
+        if theme.isPixel { return true }
         return agentsInSelectedSpaceOnly
     }
     @AppStorage("AgentsCompact") private var agentsCompact = false
@@ -732,20 +732,22 @@ private struct DestinationContentView: View {
                                 .accessibilityIdentifier("herdr-agent-view")
                             }
                             if theme.isPixel { agentsCompactToggle }
-                            Button {
-                                agentsInSelectedSpaceOnly = !scopeAgentsToSpace
-                            } label: {
-                                Image(systemName: scopeAgentsToSpace
-                                      ? "line.3.horizontal.decrease.circle.fill"
-                                      : "line.3.horizontal.decrease.circle")
-                                    .font(.system(size: typography.body, weight: .semibold))
-                                    .foregroundStyle(scopeAgentsToSpace ? theme.accent : .secondary)
-                                    .frame(width: 23, height: typography.metric(20))
+                            if !theme.isPixel {
+                                Button {
+                                    agentsInSelectedSpaceOnly = !scopeAgentsToSpace
+                                } label: {
+                                    Image(systemName: scopeAgentsToSpace
+                                          ? "line.3.horizontal.decrease.circle.fill"
+                                          : "line.3.horizontal.decrease.circle")
+                                        .font(.system(size: typography.body, weight: .semibold))
+                                        .foregroundStyle(scopeAgentsToSpace ? theme.accent : .secondary)
+                                        .frame(width: 23, height: typography.metric(20))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("agents-space-filter")
+                                .help(scopeAgentsToSpace ? "Show Agents in All Spaces"
+                                                                : "Show Agents in Selected Space Only")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("agents-space-filter")
-                            .help(scopeAgentsToSpace ? "Show Agents in All Spaces"
-                                                            : "Show Agents in Selected Space Only")
                         }
                         let agents = herdr.visibleAgents(inSelectedSpaceOnly: scopeAgentsToSpace,
                                                          followHerdrView: followsHerdrAgentView)
@@ -2113,11 +2115,13 @@ private struct DestinationContentView: View {
 
     /// An agent card as in the Windows strip: status square, name, machine badge, then status and detail.
     private func pixelAgentCard(_ agent: HerdrAgent, selected: Bool) -> some View {
-        HStack(spacing: 8) {
-            AgentStatusDot(status: agent.agentStatus)
+        let role = AgentCardRole(agent.displayName)
+        let working = agent.agentStatus == "working"
+        return HStack(spacing: 8) {
+            AgentSpriteView(agentName: agent.displayName, size: 34)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {
-                    Text(agent.displayName)
+                    Text(role.title)
                         .font(theme.chromeFont(typography.body, weight: .semibold))
                         .foregroundStyle(theme.text)
                         .lineLimit(1)
@@ -2128,7 +2132,7 @@ private struct DestinationContentView: View {
                         .overlay(Rectangle().strokeBorder(theme.accent.opacity(0.6), lineWidth: 1))
                 }
                 if !agentsCompact {
-                    Text(agent.detail.map { "\(agent.displayStatus) · \($0)" } ?? agent.displayStatus)
+                    Text("\(role.label) \(agent.displayStatus.capitalized)")
                         .font(theme.chromeFont(typography.secondary))
                         .foregroundStyle(theme.muted)
                         .lineLimit(1)
@@ -2137,7 +2141,8 @@ private struct DestinationContentView: View {
             Spacer(minLength: 0)
         }
         .sidebarRow(selected: selected, height: agentsCompact ? 28 : 44)
-        .overlay(Rectangle().strokeBorder(theme.ameBorderColor, lineWidth: selected ? 0 : 1))
+        .overlay(Rectangle().strokeBorder(theme.ameBorderColor, lineWidth: selected || working ? 0 : 1))
+        .overlay(Rectangle().strokeBorder(Color.orange, lineWidth: selected || working ? 2 : 0))
     }
 
     private func agentLocation(_ agent: HerdrAgent) -> String {

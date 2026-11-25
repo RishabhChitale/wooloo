@@ -170,3 +170,79 @@ struct PcHostSection: View {
         return "CPU \(cpu) · RAM \(Int(used.rounded()))/\(Int(total.rounded()))G"
     }
 }
+
+/// Splits a roster name such as "second-commander-wooloo-port-and" into the card's title and role label.
+struct AgentCardRole {
+    let title: String
+    let label: String
+
+    init(_ name: String) {
+        let lower = name.lowercased()
+        if lower.hasPrefix("second-commander") {
+            title = "second-commander"
+            label = "Second commander"
+        } else if lower.hasPrefix("commander") {
+            title = "commander"
+            label = "Commander"
+        } else {
+            title = name
+            label = "Agent"
+        }
+    }
+}
+
+/// The Pokemon the PC assigned to each agent (`pc-sprites.json`, role name to dex number) and its art, which
+/// stays in ~/.local/share/pokemon-agents on this Mac and is never part of the app. Missing files draw nothing.
+enum AgentSprites {
+    private static let cache = NSCache<NSNumber, NSImage>()
+
+    static func load() -> [String: Int] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        guard let data = FileManager.default.contents(atPath: "\(home)/.local/share/unit-strip/pc-sprites.json"),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        var found: [String: Int] = [:]
+        for (key, value) in object {
+            if let number = value as? Int { found[key.lowercased()] = number }
+        }
+        return found
+    }
+
+    /// The first frame of `<dex>.gif`, or nil when the file is not there.
+    static func image(dex: Int) -> NSImage? {
+        if let cached = cache.object(forKey: NSNumber(value: dex)) { return cached }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        guard let image = NSImage(contentsOfFile: "\(home)/.local/share/pokemon-agents/\(dex).gif") else { return nil }
+        cache.setObject(image, forKey: NSNumber(value: dex))
+        return image
+    }
+}
+
+/// A square sprite for an agent card; nothing is drawn (and no space is kept) without a sprite and its art file.
+struct AgentSpriteView: View {
+    let agentName: String
+    let size: CGFloat
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: size, height: size)
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                let name = agentName.lowercased()
+                let loaded = await Task.detached(priority: .utility) { () -> NSImage? in
+                    guard let dex = AgentSprites.load()[name] else { return nil }
+                    return AgentSprites.image(dex: dex)
+                }.value
+                if image !== loaded { image = loaded }
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+            }
+        }
+    }
+}
