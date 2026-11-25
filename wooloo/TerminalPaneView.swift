@@ -299,7 +299,7 @@ struct TerminalPaneView: NSViewRepresentable {
         view.closePopup = closePopup
         view.isRichText = false
         view.isEditable = true
-        view.registerForDraggedTypes([.fileURL, .string, TerminalTabDrop.pasteboardType, TerminalTabDrop.panePasteboardType])
+        view.registerForDraggedTypes([.fileURL, .string, .png, .tiff, TerminalTabDrop.pasteboardType, TerminalTabDrop.panePasteboardType])
         view.isSelectable = true
         view.selectedTextAttributes = [
             .backgroundColor: NSColor.selectedTextBackgroundColor,
@@ -2605,7 +2605,7 @@ final class HerdrTerminalTextView: NSTextView {
             let allowed = sender.draggingSourceOperationMask
             return allowed.contains(.move) ? .move : allowed.contains(.generic) ? .generic : .copy
         }
-        return droppedText(sender.draggingPasteboard) == nil ? [] : .copy
+        return droppedText(sender.draggingPasteboard) == nil && !Self.carriesMedia(sender.draggingPasteboard) ? [] : .copy
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -2648,7 +2648,8 @@ final class HerdrTerminalTextView: NSTextView {
             }
             return tabDrop.drop(target.paneID, target.edge)
         }
-        guard let text = droppedText(sender.draggingPasteboard) else { return false }
+        let text = droppedText(sender.draggingPasteboard)
+        guard text != nil || Self.carriesMedia(sender.draggingPasteboard) else { return false }
         var target = paneID
         if let surface {
             let point = convert(sender.draggingLocation, from: nil)
@@ -2660,10 +2661,24 @@ final class HerdrTerminalTextView: NSTextView {
             }
         }
         window?.makeFirstResponder(self)
-        if let urls = Self.droppedFileURLs(sender.draggingPasteboard) {
-            pasteFiles(urls, into: target)
+        let pasteboard = sender.draggingPasteboard
+        if let urls = Self.droppedFileURLs(pasteboard) {
+            // Copy at once: a screenshot's thumbnail points at a temporary file that macOS moves when it saves.
+            let kept = Self.stashDroppedFiles(urls)
+            if !kept.isEmpty {
+                pasteFiles(kept, into: target)
+                return true
+            }
+        }
+        if let png = Self.droppedImagePNG(pasteboard) {
+            let destination = target
+            Task { @MainActor [weak self] in
+                guard let url = await TerminalDropFiles.writeImage(png) else { return }
+                self?.pasteFiles([url], into: destination)
+            }
             return true
         }
+        guard let text else { return false }
         sendPaste?(text, target)
         return true
     }
@@ -2705,6 +2720,48 @@ final class HerdrTerminalTextView: NSTextView {
                                           options: [.urlReadingFileURLsOnly: true]) as? [URL]
         guard let urls, !urls.isEmpty else { return nil }
         return urls
+    }
+
+    /// A drop that carries a picture and no file, such as an image dragged out of a preview.
+    static func carriesMedia(_ pasteboard: NSPasteboard) -> Bool {
+        pasteboard.data(forType: .png) != nil || pasteboard.data(forType: .tiff) != nil
+    }
+
+    /// The picture a drop carries, as PNG data.
+    static func droppedImagePNG(_ pasteboard: NSPasteboard) -> Data? {
+        if let png = pasteboard.data(forType: .png) { return png }
+        guard let tiff = pasteboard.data(forType: .tiff), let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    /// Copies dropped files that still exist into a private temporary folder, one folder per drop so each keeps
+    /// its name. Directories and files over the upload cap are kept as they are. Files that are already gone
+    /// are left out. Folders older than a day are removed.
+    static func stashDroppedFiles(_ urls: [URL]) -> [URL] {
+        let manager = FileManager.default
+        let root = manager.temporaryDirectory.appendingPathComponent("wooloo-drops", isDirectory: true)
+        try? manager.createDirectory(at: root, withIntermediateDirectories: true)
+        let old = Date().addingTimeInterval(-86_400)
+        let keys: [URLResourceKey] = [.contentModificationDateKey]
+        for url in (try? manager.contentsOfDirectory(at: root, includingPropertiesForKeys: keys)) ?? [] {
+            let modified = (try? url.resourceValues(forKeys: Set(keys)))?.contentModificationDate
+            if let modified, modified < old { try? manager.removeItem(at: url) }
+        }
+        let folder = root.appendingPathComponent(String(UUID().uuidString.prefix(8)).lowercased(), isDirectory: true)
+        try? manager.createDirectory(at: folder, withIntermediateDirectories: true)
+        var kept: [URL] = []
+        for url in urls {
+            var isDirectory: ObjCBool = false
+            guard manager.fileExists(atPath: url.path, isDirectory: &isDirectory) else { continue }
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+            if isDirectory.boolValue || size > PeerDrop.maxBytes {
+                kept.append(url)
+                continue
+            }
+            let copy = folder.appendingPathComponent(url.lastPathComponent)
+            kept.append((try? manager.copyItem(at: url, to: copy)) != nil ? copy : url)
+        }
+        return kept
     }
 
     /// What a drop pastes: shell-escaped file paths, or text as is.
