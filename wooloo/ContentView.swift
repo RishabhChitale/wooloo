@@ -583,11 +583,42 @@ private struct DestinationContentView: View {
         }
     }
 
+    /// The Windows app keeps Spaces in the right column; the left rail holds only agents, usage, tasks and host.
+    private var spacesLiveOnTheRight: Bool {
+        theme.isPixel && window.showsFilesSidebar && destinations.canAccessActiveDestination
+    }
+
+    /// Windows order: CLAUDE usage, ACTIVE TASKS, then HOST, under the agents.
+    @ViewBuilder
+    private var pixelRailFooter: some View {
+        Divider()
+        AgentQuotaSection(machine: explorerMachine).padding(7)
+        Divider()
+        ActiveTasksSection(agents: herdr.snapshot?.agents ?? []).padding(7)
+        Divider()
+        hostSection.padding(7)
+    }
+
+    @ViewBuilder
+    private var classicRailFooter: some View {
+        Divider()
+        hostSection.padding(7)
+        Divider()
+        AgentQuotaSection(machine: explorerMachine).padding(7)
+    }
+
+    private var hostSection: some View {
+        let directory: String? = explorerLocation?.machine?.id == explorerMachine?.id ? explorerLocation?.root : nil
+        return HostStatsSection(machine: explorerMachine, directory: directory)
+    }
+
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 13) {
-                    spacesSection()
+                    if !spacesLiveOnTheRight {
+                        spacesSection()
+                    }
 
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 0) {
@@ -715,15 +746,10 @@ private struct DestinationContentView: View {
             }
 
             if destinations.canAccessActiveDestination {
-                Divider()
-                HostStatsSection(machine: explorerMachine,
-                    directory: explorerLocation?.machine?.id == explorerMachine?.id ? explorerLocation?.root : nil)
-                    .padding(7)
-                Divider()
-                AgentQuotaSection(machine: explorerMachine).padding(7)
                 if theme.isPixel {
-                    Divider()
-                    ActiveTasksSection(agents: herdr.snapshot?.agents ?? []).padding(7)
+                    pixelRailFooter
+                } else {
+                    classicRailFooter
                 }
             }
             Divider()
