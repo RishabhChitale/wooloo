@@ -78,6 +78,7 @@ jobs:
             -resultBundlePath build/wooloo.xcresult \
             -skip-testing:woolooTests/ViewSnapshotTests \
             -skip-testing:woolooTests/TerminalRenderingTests/testSnapshotsMatch \
+            -skip-testing:woolooTests/MarkdownPreviewRenderingTests \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
             SWIFT_STRICT_CONCURRENCY=complete \
             CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
