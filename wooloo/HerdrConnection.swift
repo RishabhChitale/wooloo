@@ -1244,6 +1244,7 @@ final class HerdrStore: ObservableObject {
         if let surface { popupBlocksPaneInput = surface.popup != nil }
         if surface == nil || surface?.focusedPaneID == requestedFocusPaneID { requestedFocusPaneID = nil }
         surfaceFeed.publish(surface, answersUser: completesSwitch)
+        fitScaleToSurface(surface)
         // The surface is drawn; the window shows the selection in the next turn, after this
         // turn's commit has put the surface on screen.
         if showsTab, unpublishedSelection != nil {
@@ -1895,6 +1896,47 @@ final class HerdrStore: ObservableObject {
         if surfaceStream?.focus(paneID: paneID) == true { requestedFocusPaneID = paneID }
     }
 
+    /// How far the live terminal's text is scaled down (1 = normal size) so a mirrored terminal that is wider
+    /// than the window still shows every column; Herdr sends its natural width when the window asks for less.
+    @Published private(set) var fitScale: CGFloat = 1
+    /// The smallest the text is scaled to; past it the surface is cropped, as before.
+    static let fitFloor: CGFloat = 0.8
+    /// The size of the area the live surface fills, set by the window.
+    private var fitViewport = CGSize.zero
+    /// The width in columns a mirrored terminal tab needs to show uncut, as Herdr last reported it (0 = never overflowed).
+    private(set) var naturalColumns = 0
+
+    /// The window tells the store how much room the live surface has. A new size starts again from normal
+    /// text size, and the surface that answers decides whether it has to shrink.
+    func setSurfaceViewport(_ size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        if size != fitViewport { fitScale = 1 }
+        fitViewport = size
+        sendViewportSize()
+    }
+
+    private func sendViewportSize() {
+        let cell = CGSize(width: TerminalPaneView.cellWidth * fitScale, height: TerminalPaneView.cellHeight * fitScale)
+        let cols = max(1, Int((fitViewport.width - 20) / cell.width))
+        let rows = max(1, Int((fitViewport.height - 18) / cell.height))
+        resizeSurface(cols: cols, rows: rows, cellWidth: Int(cell.width.rounded()), cellHeight: Int(cell.height.rounded()))
+    }
+
+    /// Shrinks the text when the surface Herdr sent is wider than the columns the window asked for.
+    private func fitScaleToSurface(_ surface: HerdrSurface?) {
+        guard let surface, fitViewport.width > 0 else { return }
+        let cellWidth = TerminalPaneView.cellWidth
+        let usable = fitViewport.width - 20
+        let askedColumns = Int(usable / (cellWidth * fitScale))
+        guard surface.width > askedColumns else { return }
+        naturalColumns = surface.width
+        let wanted = CGFloat(surface.width + 1) * cellWidth
+        let needed = max(Self.fitFloor, min(1, usable / wanted))
+        guard needed < fitScale - 0.004 else { return }
+        fitScale = needed
+        sendViewportSize()
+    }
+
     func resizeSurface(cols: Int, rows: Int, cellWidth: Int, cellHeight: Int) {
         guard cols > 0, rows > 0, cols <= 1000, rows <= 1000 else { return }
         guard (cols, rows, cellWidth, cellHeight) != (surfaceCols, surfaceRows, self.cellWidth, self.cellHeight) else { return }
@@ -2066,4 +2108,11 @@ final class HerdrStore: ObservableObject {
             presentationEstablished = true
         }
     }
+}
+
+extension Notification.Name {
+    /// Sizes the Spaces sidebar so a mirrored PC terminal fits at normal text size (View > Fit PC Panes).
+    static let fitPCPanes = Notification.Name("wooloo.fitPCPanes")
+    /// Toggles the Spaces sidebar between its width and the narrowest width.
+    static let narrowSpacesSidebar = Notification.Name("wooloo.narrowSpacesSidebar")
 }

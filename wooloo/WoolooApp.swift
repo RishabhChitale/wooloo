@@ -107,6 +107,10 @@ private struct WoolooCommands: Commands {
             item("refresh_files")
             Button("Save Window Screenshot") { SelfShot.saveToDesktop() }
                 .keyboardShortcut("s", modifiers: [.command, .shift, .option])
+            Button("Fit PC Panes") { NotificationCenter.default.post(name: .fitPCPanes, object: nil) }
+                .keyboardShortcut("0", modifiers: [.command, .option])
+            Button("Narrow or Restore Spaces Sidebar") { NotificationCenter.default.post(name: .narrowSpacesSidebar, object: nil) }
+                .keyboardShortcut("9", modifiers: [.command, .option])
             Divider()
             toggle("toggle_wrap_lines", title: "Wrap Lines", isOn: wrapsLines)
             Divider()
