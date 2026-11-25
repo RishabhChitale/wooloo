@@ -53,12 +53,21 @@ struct ActiveTasksSection: View {
         busy.isEmpty ? "idle" : "\(busy.count) running · " + (busy.first.map { taskText($0) } ?? "")
     }
 
+    /// The task file is keyed by the Herdr agent's name, which may sit in `name`, `agent` or the display name.
+    private func entry(_ agent: HerdrAgent) -> ActiveTaskLabel? {
+        let keys: [String?] = [agent.name, agent.agent, agent.displayName]
+        for key in keys {
+            if let key, let found = labels[key.lowercased()] { return found }
+        }
+        return nil
+    }
+
     private func taskText(_ agent: HerdrAgent) -> String {
-        labels[agent.displayName.lowercased()]?.label ?? agent.displayName
+        entry(agent)?.label ?? agent.displayName
     }
 
     private func elapsed(_ agent: HerdrAgent) -> String? {
-        guard let started = labels[agent.displayName.lowercased()]?.started else { return nil }
+        guard let started = entry(agent)?.started else { return nil }
         let seconds = Int(now.timeIntervalSince1970 - started)
         guard seconds >= 0, seconds < 86_400 else { return nil }
         if seconds >= 3_600 { return "\(seconds / 3_600)h \(seconds % 3_600 / 60)m" }
