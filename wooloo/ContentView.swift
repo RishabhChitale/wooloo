@@ -498,8 +498,12 @@ private struct DestinationContentView: View {
     }
 
     /// The Spaces list and its New Space button; the left sidebar and the top of the right one show it.
-    private func spacesSection(spacesToggle: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+    private func spacesHeader(spacesToggle: Bool) -> some View {
+        let showsTheme: Bool = spacesToggle || !window.showsFilesSidebar || theme.isPixel
+        return spacesHeaderRow(spacesToggle: spacesToggle, showsTheme: showsTheme)
+    }
+
+    private func spacesHeaderRow(spacesToggle: Bool, showsTheme: Bool) -> some View {
             HStack(spacing: 0) {
                 if spacesToggle {
                     Button { spacesOnly.toggle() } label: {
@@ -532,14 +536,29 @@ private struct DestinationContentView: View {
                 .buttonStyle(.plain)
                 .help("New Space")
                 .disabled(!herdr.isConnected)
-                if spacesToggle || !window.showsFilesSidebar {
+                if showsTheme {
                     ThemeButton().padding(.leading, 6)
                 }
             }
+    }
+
+    private func duplicateLabels(for store: HerdrStore) -> Set<String> {
+        var labels: Set<String> = []
+        guard store.machine == nil else { return labels }
+        for other in destinations.stores where other.machine != nil && other.isConnected {
+            let spaces: [HerdrWorkspace] = (other.snapshot ?? other.cachedSnapshot)?.workspaces ?? []
+            for space in spaces { labels.insert(space.label) }
+        }
+        return labels
+    }
+
+    private var spacesList: some View {
+        VStack(alignment: .leading, spacing: 3) {
             ForEach(destinations.stores, id: \.contextID) { store in
                 HerdrDestinationSection(store: store, notifier: notifier,
                     spaceDrag: window.spaceDrag, tabDrag: window.tabDrag,
                     active: store === herdr, grouped: true,
+                    hiddenLabels: duplicateLabels(for: store),
                     manage: { window.showsSessionPicker = true },
                     remove: { Task { await removeConnection(store) } },
                     select: { destinations.select(store, workspaceID: $0) },
@@ -559,13 +578,21 @@ private struct DestinationContentView: View {
         }
     }
 
+    private func spacesSection(spacesToggle: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            spacesHeader(spacesToggle: spacesToggle)
+            spacesList
+        }
+    }
+
     /// The Spaces list on top of the right sidebar, so Spaces stay reachable with the left sidebar
     /// hidden. It is as tall as its rows, up to about six, and scrolls beyond that.
     @ViewBuilder
     private var filesSidebarSpaces: some View {
         let scroll = ScrollView {
-            spacesSection(spacesToggle: true)
-                .padding(7)
+            spacesList
+                .padding(.horizontal, 7)
+                .padding(.bottom, 7)
                 .background {
                     GeometryReader { proxy in
                         Color.clear.onChange(of: proxy.size.height, initial: true) { _, height in
@@ -574,12 +601,18 @@ private struct DestinationContentView: View {
                     }
                 }
         }
-        if RightSidebarLayout.spacesFillsSidebar(spacesOnly: spacesOnly) && !showsExplorer && !showsGitHub {
-            // Fills the sidebar from the top down to the Files and GitHub row; with a panel open
-            // below, Spaces keep their usual height.
-            scroll.frame(maxHeight: .infinity)
-        } else {
-            scroll.frame(height: min(spacesContentHeight, typography.metric(210)))
+        VStack(alignment: .leading, spacing: 0) {
+            spacesHeader(spacesToggle: true)
+                .padding(.horizontal, 7)
+                .padding(.top, 7)
+                .padding(.bottom, 3)
+            if RightSidebarLayout.spacesFillsSidebar(spacesOnly: spacesOnly) && !showsExplorer && !showsGitHub {
+                // Fills the sidebar from the top down to the Files and GitHub row; with a panel open
+                // below, Spaces keep their usual height.
+                scroll.frame(maxHeight: .infinity)
+            } else {
+                scroll.frame(height: min(spacesContentHeight, typography.metric(210)))
+            }
         }
     }
 

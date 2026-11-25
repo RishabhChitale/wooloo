@@ -1473,7 +1473,7 @@ final class HerdrTerminalTextView: NSTextView {
             let frame = pixelRect(HerdrRect(x: r.x, y: r.y, width: r.width, height: r.height)).insetBy(dx: 1, dy: 1)
             let focused = surface.focusedPaneID == id
             context.saveGState()
-            context.setStrokeColor(WoolooTheme.nsColor(focused ? palette.accent : palette.surface1).cgColor)
+            context.setStrokeColor(WoolooTheme.nsColor(focused ? palette.accent : palette.selection).cgColor)
             context.setLineWidth(2)
             context.stroke(frame)
             context.restoreGState()
@@ -1496,7 +1496,7 @@ final class HerdrTerminalTextView: NSTextView {
             context.clip(to: row)
             context.setFillColor(color(palette.panel).cgColor)
             context.fill(row)
-            context.setFillColor(color(focused ? palette.accent : palette.surface1).cgColor)
+            context.setFillColor(color(focused ? palette.accent : palette.selection).cgColor)
             context.fill(CGRect(x: row.minX, y: row.maxY - 2, width: row.width, height: 2))
             var x = row.minX + 6
             let status: UInt32? = {

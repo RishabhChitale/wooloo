@@ -779,7 +779,7 @@ final class ContentCommandsTests: XCTestCase {
         let suite = "LeftSidebarTests-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        XCTAssertFalse(LeftSidebarPreference.isVisible(defaults: defaults), "hidden on a first launch")
+        XCTAssertTrue(LeftSidebarPreference.isVisible(defaults: defaults), "open on a first launch")
         LeftSidebarPreference.set(true, defaults: defaults)
         XCTAssertTrue(LeftSidebarPreference.isVisible(defaults: defaults))
         LeftSidebarPreference.set(false, defaults: defaults)

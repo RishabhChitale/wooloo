@@ -547,6 +547,7 @@ struct HerdrDestinationSection: View {
     @ObservedObject var tabDrag: TabDragModel
     let active: Bool
     let grouped: Bool
+    var hiddenLabels: Set<String> = []
     var manage: () -> Void = {}
     var remove: () -> Void = {}
     let select: (String) -> Void
@@ -619,7 +620,10 @@ struct HerdrDestinationSection: View {
                 let overrides = SpaceCategory.merged(manual: SpaceCategory.decodeOverrides(categoryOverridesRaw),
                                                      unit: unitProgress.files.spaceCategories)
                 let hiddenCategories = SpaceCategory.decodeCollapsed(collapsedCategoriesRaw)
-                ForEach(SpaceCategory.grouped((store.snapshot ?? store.cachedSnapshot)?.workspaces ?? [], overrides: overrides)) { group in
+                let shownSpaces: [HerdrWorkspace] = ((store.snapshot ?? store.cachedSnapshot)?.workspaces ?? []).filter { space in
+                    !hiddenLabels.contains(space.label) || (active && store.selectedWorkspaceID == space.workspaceID)
+                }
+                ForEach(SpaceCategory.grouped(shownSpaces, overrides: overrides)) { group in
                     let isHidden = hiddenCategories.contains(group.category)
                     categoryHeader(group, isCollapsed: isHidden)
                     // A collapsed group still shows the selected Space, so the current row never disappears.

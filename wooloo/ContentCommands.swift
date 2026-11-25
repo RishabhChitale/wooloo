@@ -78,12 +78,15 @@ extension HerdrStore {
     var selectedPanes: [HerdrPane] { panes(inTab: selectedTabID) }
 }
 
-/// Whether the left sidebar is open at launch and in new windows: hidden until the user shows it,
-/// and then as they left it.
+/// Whether the left sidebar is open at launch and in new windows: open on a first launch (it holds the
+/// agents, usage, tasks and host rail), and then as the user left it.
 enum LeftSidebarPreference {
     static let key = "leftSidebarVisible"
 
-    static func isVisible(defaults: UserDefaults = .standard) -> Bool { defaults.bool(forKey: key) }
+    static func isVisible(defaults: UserDefaults = .standard) -> Bool {
+        guard defaults.object(forKey: key) != nil else { return true }
+        return defaults.bool(forKey: key)
+    }
 
     static func set(_ visible: Bool, defaults: UserDefaults = .standard) { defaults.set(visible, forKey: key) }
 }
