@@ -269,3 +269,42 @@ final class PeerLinkHolder: ObservableObject {
         }
     }
 }
+
+/// Sends a file to a paired PC over the machine's API bridge (`wooloo.drop`, answered by the PC's
+/// herdr_compat.py), so a screenshot or dropped file can be pasted into a PC pane as a path that exists there.
+enum PeerDrop {
+    /// The PC refuses more than 25 MB; the base64 request is a third larger.
+    static let maxBytes = 25_000_000
+
+    @available(*, noasync, message: "Blocks its thread: call it inside BlockingWork.run")
+    static func upload(socketPath: String, name: String, data: Data) throws -> String {
+        guard data.count <= maxBytes else { throw HerdrSocketError.message("The file is too large to send.") }
+        let fd = try HerdrSocket.open(path: socketPath)
+        defer { close(fd) }
+        var timeout = timeval(tv_sec: 40, tv_usec: 0)
+        withUnsafePointer(to: &timeout) { pointer in
+            _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, pointer, socklen_t(MemoryLayout<timeval>.size))
+            _ = setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, pointer, socklen_t(MemoryLayout<timeval>.size))
+        }
+        let encoded = data.base64EncodedString()
+        try HerdrSocket.send(fd: fd, method: "wooloo.drop", params: ["name": name, "data": encoded])
+        var response = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while response.count < 65_536 {
+            let count = Darwin.read(fd, &buffer, buffer.count)
+            guard count > 0 else { throw HerdrSocketError.message("The PC did not confirm the upload.") }
+            response.append(contentsOf: buffer.prefix(count))
+            guard let newline = response.firstIndex(of: 0x0A) else { continue }
+            let line = Data(response[..<newline])
+            guard let object = try JSONSerialization.jsonObject(with: line) as? [String: Any] else { break }
+            if let error = object["error"] as? [String: Any] {
+                throw HerdrSocketError.message(error["message"] as? String ?? "The PC refused the upload.")
+            }
+            if let result = object["result"] as? [String: Any], let path = result["path"] as? String, !path.isEmpty {
+                return path
+            }
+            break
+        }
+        throw HerdrSocketError.message("The PC sent an unreadable upload reply.")
+    }
+}

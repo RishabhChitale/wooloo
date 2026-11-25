@@ -1022,6 +1022,10 @@ final class TerminalFileLinks {
 
     var context: (String) -> Context = { _ in Context(cwd: nil, machine: nil) }
     var directory: (String) async throws -> String? = { _ in nil }
+    /// Whether the pane belongs to a paired PC, whose files a Mac path cannot name.
+    var peerPane: (String) -> Bool = { _ in false }
+    /// Sends a file's bytes to the pane's PC under the given name and returns its path there.
+    var upload: (String, String, Data) async throws -> String? = { _, _, _ in nil }
     var check: @Sendable (TerminalFileReference, Context) async throws -> WorkspaceTerminalPath? = { file, context in
         try await WorkspaceFiles.blocking(on: context.machine, priority: .userInitiated) {
             try WorkspaceFiles.terminalPath(file.path, cwd: context.cwd, root: context.root, machine: context.machine)
@@ -1799,7 +1803,7 @@ final class HerdrTerminalTextView: NSTextView {
     override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
         if item.action == #selector(copy(_:)), terminalGrid != nil { return hasCellSelection }
         // NSTextView would check the general pasteboard, not the one Paste reads.
-        if item.action == #selector(paste(_:)) { return pasteboard.string(forType: .string) != nil }
+        if item.action == #selector(paste(_:)) { return canPaste }
         return super.validateUserInterfaceItem(item)
     }
 
@@ -2131,7 +2135,7 @@ final class HerdrTerminalTextView: NSTextView {
         let menu = NSMenu()
         menu.addItem(standardItem("Copy", #selector(copy(_:)), enabled: hasCellSelection || selectedRange().length > 0))
         menu.addItem(standardItem("Paste", #selector(paste(_:)),
-                                  enabled: pasteboard.string(forType: .string) != nil))
+                                  enabled: canPaste))
         menu.addItem(standardItem("Select All", #selector(selectAll(_:)), enabled: true))
         if surface?.popup != nil {
             menu.addItem(.separator())
@@ -2400,7 +2404,57 @@ final class HerdrTerminalTextView: NSTextView {
     override func paste(_ sender: Any?) {
         if let value = pasteboard.string(forType: .string), !value.isEmpty {
             if !popupInput(.paste(value)) { sendPaste?(value, paneID) }
+            return
         }
+        pasteClipboardImage()
+    }
+
+    /// Whether Paste has anything to insert: text, or a copied image such as a screenshot.
+    var canPaste: Bool {
+        pasteboard.string(forType: .string) != nil || pasteboard.data(forType: .png) != nil
+            || pasteboard.data(forType: .tiff) != nil
+    }
+
+    /// A copied image has no text, so it is saved as a PNG and pasted as a file path, which is what
+    /// Claude Code and other terminal tools read. In a PC pane the file goes to the PC first.
+    private func pasteClipboardImage() {
+        var copied = pasteboard.data(forType: .png)
+        if copied == nil, let tiff = pasteboard.data(forType: .tiff), let image = NSBitmapImageRep(data: tiff) {
+            copied = image.representation(using: .png, properties: [:])
+        }
+        guard let png = copied else { return }
+        let target = paneID
+        Task { @MainActor [weak self] in
+            guard let url = await TerminalDropFiles.writeImage(png) else { return }
+            self?.pasteFiles([url], into: target, viaPopup: true)
+        }
+    }
+
+    /// Pastes files into `target` as paths. In a pane of a paired PC each file is uploaded first and the
+    /// PC's path is pasted; for any other pane, or when an upload fails, the Mac path is pasted.
+    private func pasteFiles(_ urls: [URL], into target: String, viaPopup: Bool = false) {
+        guard !urls.isEmpty else { return }
+        guard let links = fileLinks, links.peerPane(target) else {
+            deliverPaste(TerminalDropFiles.macPaths(urls), to: target, viaPopup: viaPopup)
+            return
+        }
+        let upload = links.upload
+        Task { @MainActor [weak self] in
+            var parts: [String] = []
+            for url in urls {
+                if let remote = await TerminalDropFiles.uploaded(url, paneID: target, upload: upload) {
+                    parts.append(TerminalDropFiles.windowsPaste(remote))
+                } else {
+                    parts.append(HerdrTerminalTextView.shellEscaped(url.path))
+                }
+            }
+            self?.deliverPaste(parts.joined(separator: " ") + " ", to: target, viaPopup: viaPopup)
+        }
+    }
+
+    private func deliverPaste(_ text: String, to target: String, viaPopup: Bool) {
+        if viaPopup, popupInput(.paste(text)) { return }
+        sendPaste?(text, target)
     }
 
     // Dropped files paste their shell-escaped paths into the pane under the pointer,
@@ -2472,6 +2526,10 @@ final class HerdrTerminalTextView: NSTextView {
             }
         }
         window?.makeFirstResponder(self)
+        if let urls = Self.droppedFileURLs(sender.draggingPasteboard) {
+            pasteFiles(urls, into: target)
+            return true
+        }
         sendPaste?(text, target)
         return true
     }
@@ -2507,6 +2565,14 @@ final class HerdrTerminalTextView: NSTextView {
         dropOverlay.show(target.map { dropOverlay.convert($0.highlight, from: self) }, accent: theme.herdr.accent)
     }
 
+    /// The files a drop carries, if it carries any.
+    static func droppedFileURLs(_ pasteboard: NSPasteboard) -> [URL]? {
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self],
+                                          options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        guard let urls, !urls.isEmpty else { return nil }
+        return urls
+    }
+
     /// What a drop pastes: shell-escaped file paths, or text as is.
     func droppedText(_ pasteboard: NSPasteboard) -> String? {
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self],
@@ -2530,5 +2596,71 @@ final class HerdrTerminalTextView: NSTextView {
             }
         }
         return result
+    }
+}
+
+/// Files that reach a terminal by path: a copied image saved as a PNG, and dropped files uploaded to a PC.
+enum TerminalDropFiles {
+    static func macPaths(_ urls: [URL]) -> String {
+        var parts: [String] = []
+        for url in urls { parts.append(HerdrTerminalTextView.shellEscaped(url.path)) }
+        return parts.joined(separator: " ") + " "
+    }
+
+    /// A Windows path as the PC's shells and Claude Code take it: plain, or quoted when it has spaces or
+    /// characters a shell would split on.
+    static func windowsPaste(_ path: String) -> String {
+        let risky = " &()[]{}^=;!'+,`~"
+        let plain = !path.contains { risky.contains($0) }
+        return plain ? path : "\"" + path + "\""
+    }
+
+    /// A name made of letters, digits and `._-`, unique per call, that keeps the file's extension.
+    static func uniqueName(for url: URL) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+        var base = ""
+        for scalar in url.deletingPathExtension().lastPathComponent.unicodeScalars {
+            base += scalar.isASCII && allowed.contains(scalar) ? String(scalar) : "_"
+        }
+        if base.isEmpty { base = "file" }
+        let ext = url.pathExtension.isEmpty ? "" : "." + url.pathExtension.lowercased()
+        let short = String(UUID().uuidString.prefix(8)).lowercased()
+        return String(base.prefix(40)) + "-" + short + ext
+    }
+
+    /// Saves a copied image under the temporary folder, removing pasted images older than a day.
+    static func writeImage(_ png: Data) async -> URL? {
+        await Task.detached(priority: .userInitiated) { () -> URL? in
+            let manager = FileManager.default
+            let directory = manager.temporaryDirectory.appendingPathComponent("wooloo-paste", isDirectory: true)
+            try? manager.createDirectory(at: directory, withIntermediateDirectories: true)
+            let old = Date().addingTimeInterval(-86_400)
+            let keys: [URLResourceKey] = [.contentModificationDateKey]
+            for url in (try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys)) ?? [] {
+                let modified = (try? url.resourceValues(forKeys: Set(keys)))?.contentModificationDate
+                if let modified, modified < old { try? manager.removeItem(at: url) }
+            }
+            let name = "screenshot-" + String(UUID().uuidString.prefix(8)).lowercased() + ".png"
+            let url = directory.appendingPathComponent(name)
+            do { try png.write(to: url, options: .atomic) } catch { return nil }
+            return url
+        }.value
+    }
+
+    /// Reads the file off the main thread and sends it to the pane's PC; nil when the file is not a regular
+    /// file within the size cap or the upload failed.
+    @MainActor
+    static func uploaded(_ url: URL, paneID: String,
+                         upload: (String, String, Data) async throws -> String?) async -> String? {
+        let name = uniqueName(for: url)
+        let data = await Task.detached(priority: .userInitiated) { () -> Data? in
+            let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey]
+            guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true,
+                  let size = values.fileSize, size <= PeerDrop.maxBytes else { return nil }
+            return try? Data(contentsOf: url, options: .mappedIfSafe)
+        }.value
+        guard let data else { return nil }
+        guard let remote = try? await upload(paneID, name, data) else { return nil }
+        return remote
     }
 }

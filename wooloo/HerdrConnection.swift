@@ -869,6 +869,18 @@ final class HerdrStore: ObservableObject {
                 try HerdrSocket.paneDirectory(path: path, paneID: paneID)
             }
         }
+        terminalFileLinks.peerPane = { [weak self] _ in
+            guard let machine = self?.machine else { return false }
+            return PeerMachine.isPeer(machine)
+        }
+        terminalFileLinks.upload = { [weak self] _, name, data in
+            guard let self, let machine = self.machine, PeerMachine.isPeer(machine) else { return nil }
+            let path = self.socketPath
+            let reaching = BlockingWorkMachine(machine)
+            return try await BlockingWork.run(priority: .userInitiated, reaching: reaching) {
+                try PeerDrop.upload(socketPath: path, name: name, data: data)
+            }
+        }
         if let metrics = TerminalPipelineMetrics.shared {
             publishRecorder = objectWillChange.sink { _ in metrics.published() }
         }
