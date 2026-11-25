@@ -75,6 +75,7 @@ private struct DestinationContentView: View {
     private var explorerLocation: WorkspaceFileLocation? { workspaceContext.location }
     @AppStorage("SidebarWidth") private var sidebarWidth = 206.0
     @AppStorage("FilesSidebarWidth") private var filesSidebarWidth = 244.0
+    @AppStorage("FilesSidebarWidthBeforeNarrow") private var filesSidebarWidthBeforeNarrow = 244.0
     @AppStorage("AgentsInSelectedSpaceOnly") private var agentsInSelectedSpaceOnly = false
     @AppStorage("AgentsCompact") private var agentsCompact = false
     @State private var followsHerdrAgentView = true
@@ -367,7 +368,36 @@ private struct DestinationContentView: View {
         let mainMinimum = 360.0
         let left = window.showsSidebar ? sidebarWidth : 0
         let right = window.showsFilesSidebar ? filesSidebarWidth : 0
-        return HStack(spacing: 0) {
+        return contentColumns(totalWidth: totalWidth, left: left, right: right, mainMinimum: mainMinimum)
+            .onReceive(NotificationCenter.default.publisher(for: .fitPCPanes)) { _ in
+                fitSidebarForPCPanes(totalWidth: totalWidth, left: left)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .narrowSpacesSidebar)) { _ in
+                narrowOrRestoreSpacesSidebar()
+            }
+    }
+
+    /// Sets the Spaces sidebar so the mirrored PC terminals show every column at normal text size when the
+    /// window is wide enough, else as narrow as the sidebar goes.
+    private func fitSidebarForPCPanes(totalWidth: CGFloat, left: Double) {
+        let columns = herdr.naturalColumns
+        guard columns > 0 else { return }
+        let terminal = CGFloat(columns) * TerminalPaneView.cellWidth + 20 + 18
+        let target = Double(totalWidth - terminal) - left
+        filesSidebarWidth = min(560, max(130, target))
+    }
+
+    private func narrowOrRestoreSpacesSidebar() {
+        if filesSidebarWidth > 140 {
+            filesSidebarWidthBeforeNarrow = filesSidebarWidth
+            filesSidebarWidth = 130
+        } else {
+            filesSidebarWidth = filesSidebarWidthBeforeNarrow
+        }
+    }
+
+    private func contentColumns(totalWidth: CGFloat, left: Double, right: Double, mainMinimum: Double) -> some View {
+        HStack(spacing: 0) {
             if window.showsSidebar {
                 sidebar.frame(width: sidebarWidth)
                 SidebarResizeHandle(width: $sidebarWidth, defaultWidth: 206, edge: .leading,
@@ -376,7 +406,7 @@ private struct DestinationContentView: View {
             mainArea
             if window.showsFilesSidebar && destinations.canAccessActiveDestination {
                 SidebarResizeHandle(width: $filesSidebarWidth, defaultWidth: 244, edge: .trailing,
-                                    range: 200...max(200, min(560, totalWidth - left - mainMinimum)))
+                                    range: 130...max(130, min(560, totalWidth - left - mainMinimum)))
                 VStack(spacing: 0) {
                     CompanionPanel(store: herdr, agents: herdr.snapshot?.agents ?? [], workspaceID: herdr.selectedWorkspaceID,
                                    width: filesSidebarWidth, spacesOnly: spacesOnly)
@@ -1036,11 +1066,12 @@ private struct DestinationContentView: View {
         for pane in selectedPanes {
             let folder = (pane.cwd ?? "").replacingOccurrences(of: "\\", with: "/")
                 .split(separator: "/").suffix(2).joined(separator: "/")
+            let scaled = herdr.fitScale < 0.995 ? " · scaled \(Int((herdr.fitScale * 100).rounded()))%" : ""
             if let agent = agents[pane.paneID] {
-                result[pane.paneID] = TerminalPaneHeader(title: agent.displayName, sub: agent.detail ?? folder,
+                result[pane.paneID] = TerminalPaneHeader(title: agent.displayName, sub: (agent.detail ?? folder) + scaled,
                                                          status: agent.agentStatus ?? pane.agentStatus)
             } else {
-                result[pane.paneID] = TerminalPaneHeader(title: "Shell", sub: folder, status: pane.agentStatus)
+                result[pane.paneID] = TerminalPaneHeader(title: "Shell", sub: folder + scaled, status: pane.agentStatus)
             }
         }
         return result
@@ -1058,6 +1089,7 @@ private struct DestinationContentView: View {
                     paneID: herdr.selectedPaneID ?? selectedPanes[0].paneID,
                     surfaceFeed: herdr.surfaceFeed,
                     paneHeaders: paneHeaders,
+                    fitScale: herdr.fitScale,
                     onPresentSurface: { herdr.acknowledgeAgentSurface($0) },
                     sendPopupInput: { event, id, boot in herdr.sendPopupInput(event, terminalID: id, bootID: boot) },
                     closePopup: { id, boot in herdr.closePopup(terminalID: id, bootID: boot) },
@@ -1933,11 +1965,8 @@ private struct DestinationContentView: View {
     }
 
     private func resizeSurface(to size: CGSize) {
-        let cols = max(1, Int((size.width - 20) / TerminalPaneView.cellWidth))
-        let rows = max(1, Int((size.height - 18) / TerminalPaneView.cellHeight))
-        herdr.resizeSurface(cols: cols, rows: rows,
-                            cellWidth: Int(TerminalPaneView.cellWidth.rounded()),
-                            cellHeight: Int(TerminalPaneView.cellHeight.rounded()))
+        // The store picks the columns: it shrinks the text when a mirrored PC terminal is wider than this area.
+        herdr.setSurfaceViewport(size)
     }
 
     /// Shown until the session connects. A stopped server can be started from here.

@@ -238,6 +238,8 @@ struct TerminalPaneView: NSViewRepresentable {
     let paneID: String
     var surfaceFeed: HerdrSurfaceFeed? = nil
     var paneHeaders: [String: TerminalPaneHeader] = [:]
+    /// How far the text is scaled down so a wider mirrored terminal fits (1 = normal size).
+    var fitScale: CGFloat = 1
     var onPresentSurface: ((HerdrSurface) -> Void)? = nil
     var sendPopupInput: ((HerdrInputEvent, String, String) -> Void)? = nil
     var closePopup: ((String, String) -> Void)? = nil
@@ -328,6 +330,7 @@ struct TerminalPaneView: NSViewRepresentable {
             view.claimKeyboardFocusIfIdle()
         }
         if view.shortcutMap.prefixLabel != shortcutMap.prefixLabel { view.clearShortcutPrefix() }
+        Self.applyFitScale(fitScale, to: scrollView)
         view.shortcutMap = shortcutMap
         view.onShortcut = onShortcut
         view.onPrefixChanged = onPrefixChanged
@@ -392,6 +395,23 @@ struct TerminalPaneView: NSViewRepresentable {
     /// glyphs from fallback fonts that overflow a cell are clipped instead of adding
     /// scrollers, which would shrink the grid and cascade into both scrollbars. The text
     /// storage is empty then, so the view keeps the clip view's size instead of fitting it.
+    /// Scales the text with the scroll view's magnification, which AppKit also applies to mouse positions.
+    private static func applyFitScale(_ scale: CGFloat, to scrollView: NSScrollView) {
+        let target = min(max(scale, 0.5), 1)
+        guard abs(scrollView.magnification - target) > 0.001 else { return }
+        scrollView.allowsMagnification = true
+        scrollView.minMagnification = 0.5
+        scrollView.maxMagnification = 1
+        scrollView.magnification = target
+        // Pinching must not change the size the window chose.
+        scrollView.minMagnification = target
+        scrollView.maxMagnification = target
+        if scrollView.hasVerticalScroller == false {
+            scrollView.contentView.scroll(to: .zero)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+    }
+
     private static func configureScrolling(_ scrollView: NSScrollView, view: NSTextView, live: Bool) {
         guard scrollView.hasVerticalScroller == live else { return }
         scrollView.hasVerticalScroller = !live
