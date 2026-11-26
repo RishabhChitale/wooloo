@@ -322,7 +322,9 @@ final class WoolooThemeTests: XCTestCase {
     func testStatusColorsFollowThePalette() {
         for theme in WoolooTheme.all {
             let states = ["working", "blocked", "done", "idle"].map(theme.agentStatus)
-            let palette = [theme.herdr.yellow, theme.herdr.red, theme.herdr.teal, theme.herdr.green]
+            // The pixel themes follow the Windows app: finished is green and seen is gray.
+            let finished = theme.isPixel ? [theme.herdr.green, theme.herdr.overlay0] : [theme.herdr.teal, theme.herdr.green]
+            let palette = [theme.herdr.yellow, theme.herdr.red] + finished
             XCTAssertEqual(states, palette.map { WoolooTheme.color($0) }, theme.id)
             XCTAssertEqual(Set(palette).count, 4, "\(theme.id): agent states share a color")
             XCTAssertEqual(theme.agentStatus(nil), theme.muted, theme.id)
