@@ -919,13 +919,27 @@ final class HerdrStore: ObservableObject {
         let selected = selectedPanes.map(\.paneID).sorted().joined(separator: ",")
         let shown = (surface?.paneIDs ?? []).sorted().joined(separator: ",")
         let split = splitPaneID(in: surface) ?? "-"
-        let rects = (surface?.paneRects ?? [:]).map { "\($0.key)=\($0.value.x),\($0.value.y),\($0.value.width)x\($0.value.height)" }
-            .sorted().joined(separator: ";")
+        var rectParts: [String] = []
+        for (id, rect) in surface?.paneRects ?? [:] {
+            rectParts.append("\(id)=\(rect.x),\(rect.y),\(rect.width)x\(rect.height)")
+        }
+        let rects = rectParts.sorted().joined(separator: ";")
         let size = surface.map { "\($0.width)x\($0.height) cells=\($0.cells.count)" } ?? "nil"
-        return "connected=\(isConnected) inputReady=\(inputReady) active=\(presentationActive) needsSurface=\(requiresSurfaceForInput) "
-            + "established=\(presentationEstablished) streamReady=\(surfaceStream?.isReady == true) surface=\(size) "
-            + "surfacePanes=[\(shown)] selectedPanes=[\(selected)] tab=\(selectedTabID ?? "-") splitPane=\(split) "
-            + "rects=[\(rects)] error=\(surfaceError ?? "-")"
+        var parts: [String] = []
+        parts.append("connected=\(isConnected)")
+        parts.append("inputReady=\(inputReady)")
+        parts.append("active=\(presentationActive)")
+        parts.append("needsSurface=\(requiresSurfaceForInput)")
+        parts.append("established=\(presentationEstablished)")
+        parts.append("streamReady=\(surfaceStream?.isReady == true)")
+        parts.append("surface=\(size)")
+        parts.append("surfacePanes=[\(shown)]")
+        parts.append("selectedPanes=[\(selected)]")
+        parts.append("tab=\(selectedTabID ?? "-")")
+        parts.append("splitPane=\(split)")
+        parts.append("rects=[\(rects)]")
+        parts.append("error=\(surfaceError ?? "-")")
+        return parts.joined(separator: " ")
     }
 
     /// Checks the paths Command points at in the terminal.
