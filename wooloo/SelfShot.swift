@@ -9,6 +9,8 @@ import AppKit
 @MainActor
 enum SelfShot {
     private static var timer: Timer?
+    /// A one-line description of the live store, logged with every screenshot.
+    static var stateProvider: (() -> String)?
 
     private static var companionDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/wooloo-companion")
@@ -73,6 +75,7 @@ enum SelfShot {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
             PeerSyncLog.write("selfshot: wrote \(data.count) bytes to \(url.lastPathComponent)")
+            if let state = stateProvider?() { PeerSyncLog.write("selfshot-state: \(state)") }
         } catch {
             PeerSyncLog.write("selfshot: write failed: \(error.localizedDescription)")
         }

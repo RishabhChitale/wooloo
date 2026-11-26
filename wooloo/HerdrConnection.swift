@@ -914,6 +914,20 @@ final class HerdrStore: ObservableObject {
 
     var isConnected: Bool { snapshot != nil && errorMessage == nil }
 
+    /// One line of the state behind "Connecting terminal..." and Split mode, written to the log by SelfShot.
+    var debugSummary: String {
+        let selected = selectedPanes.map(\.paneID).sorted().joined(separator: ",")
+        let shown = (surface?.paneIDs ?? []).sorted().joined(separator: ",")
+        let split = splitPaneID(in: surface) ?? "-"
+        let rects = (surface?.paneRects ?? [:]).map { "\($0.key)=\($0.value.x),\($0.value.y),\($0.value.width)x\($0.value.height)" }
+            .sorted().joined(separator: ";")
+        let size = surface.map { "\($0.width)x\($0.height) cells=\($0.cells.count)" } ?? "nil"
+        return "connected=\(isConnected) inputReady=\(inputReady) active=\(presentationActive) needsSurface=\(requiresSurfaceForInput) "
+            + "established=\(presentationEstablished) streamReady=\(surfaceStream?.isReady == true) surface=\(size) "
+            + "surfacePanes=[\(shown)] selectedPanes=[\(selected)] tab=\(selectedTabID ?? "-") splitPane=\(split) "
+            + "rects=[\(rects)] error=\(surfaceError ?? "-")"
+    }
+
     /// Checks the paths Command points at in the terminal.
     let terminalFileLinks = TerminalFileLinks()
 

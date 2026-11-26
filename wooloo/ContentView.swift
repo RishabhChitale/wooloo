@@ -193,6 +193,7 @@ private struct DestinationContentView: View {
             guard !Task.isCancelled else { return }
             destinations.start()
             window.commandStore = destinations.active
+            SelfShot.stateProvider = { destinations.active.debugSummary }
             if managesRuntime {
                 if let profiles = await catalog.freshMachines(), destinations.isRunning { destinations.refresh(profiles) }
             }
