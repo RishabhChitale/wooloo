@@ -1952,19 +1952,25 @@ final class HerdrStore: ObservableObject {
     private(set) var splitFit = false
 
     /// The pane Split mode shows: the agent whose name starts with "commander" (not
-    /// "second-commander"), else the leftmost, topmost pane; nil without a surface.
+    /// "second-commander"), else the leftmost agent that is not a helper, else the leftmost pane; nil without a surface.
     func splitPaneID(in surface: HerdrSurface?) -> String? {
         guard let surface, !surface.paneIDs.isEmpty else { return nil }
         if surface.paneIDs.count == 1 { return surface.paneIDs[0] }
-        for agent in snapshot?.agents ?? [] where surface.paneIDs.contains(agent.paneID) {
-            for value in [agent.name, agent.displayAgent, agent.title] {
-                if let value, value.lowercased().hasPrefix("commander") { return agent.paneID }
+        let agents = (snapshot?.agents ?? []).filter { surface.paneIDs.contains($0.paneID) }
+        func isNamed(_ agent: HerdrAgent, _ prefixes: [String]) -> Bool {
+            [agent.name, agent.displayAgent, agent.title].contains { value in
+                guard let value = value?.lowercased() else { return false }
+                return prefixes.contains { value.hasPrefix($0) }
             }
         }
+        if let commander = agents.first(where: { isNamed($0, ["commander"]) }) { return commander.paneID }
         let placed: [(id: String, x: Int, y: Int)] = surface.paneIDs.compactMap { id in
             surface.paneRects[id].map { (id: id, x: $0.x, y: $0.y) }
         }
-        return placed.min { ($0.x, $0.y) < ($1.x, $1.y) }?.id ?? surface.paneIDs.first
+        let ordered = placed.sorted { ($0.x, $0.y) < ($1.x, $1.y) }
+        // A commander without that name: an agent that is not a helper goes before a plain shell.
+        let main = Set(agents.filter { !isNamed($0, ["second", "pawn"]) }.map(\.paneID))
+        return ordered.first { main.contains($0.id) }?.id ?? ordered.first?.id ?? surface.paneIDs.first
     }
 
     /// Focuses the Split mode pane so typing goes to it, whatever pane the PC had focused.
