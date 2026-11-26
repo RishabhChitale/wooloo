@@ -230,15 +230,16 @@ struct AgentSpriteView: View {
     @State private var image: NSImage?
 
     var body: some View {
-        Group {
+        // A stack, not a Group: an empty Group passes `.task` to no view, so the art would never load.
+        ZStack {
             if let image {
                 Image(nsImage: image)
                     .interpolation(.none)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: size, height: size)
             }
         }
+        .frame(width: image == nil ? 0 : size, height: image == nil ? 0 : size)
         .task {
             while !Task.isCancelled {
                 let name = agentName.lowercased()

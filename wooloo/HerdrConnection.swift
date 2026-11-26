@@ -743,6 +743,8 @@ final class HerdrStore: ObservableObject {
     private var surfaceSwitchTabID: String?
     /// The pane last sent a pane.focus, until a surface shows it focused (see `select(paneID:)`).
     private var requestedFocusPaneID: String?
+    /// The tab the current surface stream was last asked for (see `requestSelectedSurface`).
+    private var askedSurfaceTabID: String?
     private var terminalTheme = WoolooTheme.named(WoolooTheme.fallbackID)!
     private var terminalFocused = false
     /// Tests use an isolated pasteboard, leaving the user's clipboard untouched.
@@ -1271,6 +1273,7 @@ final class HerdrStore: ObservableObject {
         if surface == nil || showsTab { endSurfaceSwitch() }
         if let surface { popupBlocksPaneInput = surface.popup != nil }
         if surface == nil || surface?.focusedPaneID == requestedFocusPaneID { requestedFocusPaneID = nil }
+        if surface == nil { askedSurfaceTabID = nil } else if !showsTab { requestSelectedSurface() }
         surfaceFeed.publish(surface, answersUser: completesSwitch)
         fitScaleToSurface(surface)
         // The surface is drawn; the window shows the selection in the next turn, after this
@@ -2199,6 +2202,16 @@ final class HerdrStore: ObservableObject {
            Set(surface.paneIDs) == Set(selectedPanes.map(\.paneID)) {
             presentationEstablished = true
         }
+        requestSelectedSurface()
+    }
+
+    /// A surface stream can connect before a snapshot has picked a tab, so nothing asked the server for
+    /// it, and no surface of the selection ever arrives. Asks once per tab until one is shown.
+    private func requestSelectedSurface() {
+        guard !presentationEstablished, let selectedTabID, askedSurfaceTabID != selectedTabID,
+              let surfaceStream, surfaceStream.isReady else { return }
+        askedSurfaceTabID = selectedTabID
+        surfaceStream.focus(tabID: selectedTabID)
     }
 }
 
