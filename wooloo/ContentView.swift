@@ -2205,7 +2205,12 @@ private struct DestinationContentView: View {
 
     /// An agent card as in the Windows strip: status square, name, machine badge, then status and detail.
     private func pixelAgentCard(_ agent: HerdrAgent, selected: Bool) -> some View {
-        let role = AgentCardRole(agent.displayName)
+        AgentCardRoleReader(name: agent.displayName, key: herdr.machine == nil ? nil : agent.paneID) { role in
+            pixelAgentCard(agent, role: role, selected: selected)
+        }
+    }
+
+    private func pixelAgentCard(_ agent: HerdrAgent, role: AgentCardRole, selected: Bool) -> some View {
         let working = agent.agentStatus == "working"
         return HStack(spacing: 8) {
             AgentSpriteView(agentName: agent.displayName, alternateKey: agent.paneID, size: 34)

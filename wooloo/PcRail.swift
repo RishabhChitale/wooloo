@@ -176,6 +176,11 @@ struct AgentCardRole {
     let title: String
     let label: String
 
+    init(title: String, label: String) {
+        self.title = title
+        self.label = label
+    }
+
     init(_ name: String) {
         let lower = name.lowercased()
         if lower.hasPrefix("second-commander") {
@@ -188,6 +193,41 @@ struct AgentCardRole {
             title = name
             label = "Agent"
         }
+    }
+}
+
+/// The names the PC's strip gives a Space's commander pair (`pc-cards.json`, terminal id to title and label).
+enum AgentCards {
+    static func load() -> [String: [String: String]] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        guard let data = FileManager.default.contents(atPath: "\(home)/.local/share/unit-strip/pc-cards.json"),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: [String: String]] else { return [:] }
+        return object
+    }
+
+    static func role(key: String, in cards: [String: [String: String]]) -> AgentCardRole? {
+        guard let card = cards[key.lowercased()], let title = card["title"], let label = card["label"] else { return nil }
+        return AgentCardRole(title: title, label: label)
+    }
+}
+
+/// Builds an agent card with the PC's names for it when `key` has them, else the names read from `name`.
+struct AgentCardRoleReader<Content: View>: View {
+    let name: String
+    /// The PC terminal id, or nil for an agent of this Mac.
+    let key: String?
+    @ViewBuilder let content: (AgentCardRole) -> Content
+    @State private var cards: [String: [String: String]] = [:]
+
+    var body: some View {
+        content(key.flatMap { AgentCards.role(key: $0, in: cards) } ?? AgentCardRole(name))
+            .task {
+                while !Task.isCancelled {
+                    let loaded = await Task.detached(priority: .utility) { AgentCards.load() }.value
+                    if loaded != cards { cards = loaded }
+                    try? await Task.sleep(nanoseconds: 15_000_000_000)
+                }
+            }
     }
 }
 
