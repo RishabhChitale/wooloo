@@ -172,12 +172,11 @@ struct FooterBranchLabel: View {
     @State private var branch: String?
 
     var body: some View {
-        Group {
+        // Always a stack, even with no branch: an empty Group would pass `.task` to no view, and never look one up.
+        HStack(spacing: 6) {
             if let branch {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.branch")
-                    Text(branch).lineLimit(1)
-                }
+                Image(systemName: "arrow.triangle.branch")
+                Text(branch).lineLimit(1)
             }
         }
         .task(id: (cwd ?? "") + "|" + (remoteBranch ?? "")) {
