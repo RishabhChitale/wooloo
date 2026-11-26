@@ -245,8 +245,11 @@ struct AgentSpriteView: View {
                 let alternate = alternateKey?.lowercased()
                 let loaded = await Task.detached(priority: .utility) { () -> NSImage? in
                     let table = AgentSprites.load()
-                    guard let dex = table[name] ?? alternate.flatMap({ table[$0] }) else { return nil }
-                    return AgentSprites.image(dex: dex)
+                    // The terminal id is unique per agent; the role name is shared by every Space's "commander".
+                    for key in [alternate, name].compactMap({ $0 }) {
+                        if let dex = table[key], let found = AgentSprites.image(dex: dex) { return found }
+                    }
+                    return nil
                 }.value
                 if image !== loaded { image = loaded }
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
