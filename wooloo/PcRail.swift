@@ -196,6 +196,22 @@ struct AgentCardRole {
     }
 }
 
+/// Half of the bracket the Windows strip draws beside a commander pair: out from one card's middle and towards the other.
+struct AgentPairBracket: Shape {
+    enum End { case top, bottom }
+    static let width: CGFloat = 20
+    let end: End
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.midY))
+        // Reaches a little past the card so the two halves meet across the gap between rows.
+        path.addLine(to: CGPoint(x: rect.midX, y: end == .top ? rect.maxY + 4 : rect.minY - 4))
+        return path
+    }
+}
+
 /// The names the PC's strip gives a Space's commander pair (`pc-cards.json`, terminal id to title and label).
 enum AgentCards {
     static func load() -> [String: [String: String]] {

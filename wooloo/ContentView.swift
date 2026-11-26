@@ -2210,8 +2210,20 @@ private struct DestinationContentView: View {
         }
     }
 
+    /// Which end of the line joining a commander to its partner this card draws; nil without both in its tab.
+    private func pairEnd(_ agent: HerdrAgent) -> AgentPairBracket.End? {
+        let own = AgentCardRole(agent.displayName).label
+        guard own != "Agent" else { return nil }
+        let other = own == "Commander" ? "Second commander" : "Commander"
+        let paired = herdr.snapshot?.agents.contains {
+            $0.tabID == agent.tabID && AgentCardRole($0.displayName).label == other
+        } == true
+        return paired ? (own == "Commander" ? .top : .bottom) : nil
+    }
+
     private func pixelAgentCard(_ agent: HerdrAgent, role: AgentCardRole, selected: Bool) -> some View {
         let working = agent.agentStatus == "working"
+        let end = pairEnd(agent)
         return HStack(spacing: 8) {
             AgentSpriteView(agentName: agent.displayName, alternateKey: agent.paneID, size: 34)
             VStack(alignment: .leading, spacing: 1) {
@@ -2238,6 +2250,14 @@ private struct DestinationContentView: View {
         .sidebarRow(selected: selected, height: agentsCompact ? 28 : 44)
         .overlay(Rectangle().strokeBorder(theme.ameBorderColor, lineWidth: selected || working ? 0 : 1))
         .overlay(Rectangle().strokeBorder(Color.orange, lineWidth: selected || working ? 2 : 0))
+        .padding(.trailing, end == nil ? 0 : AgentPairBracket.width)
+        .overlay(alignment: .trailing) {
+            if let end {
+                AgentPairBracket(end: end)
+                    .stroke(theme.muted, lineWidth: 1)
+                    .frame(width: AgentPairBracket.width)
+            }
+        }
     }
 
     private func agentLocation(_ agent: HerdrAgent) -> String {

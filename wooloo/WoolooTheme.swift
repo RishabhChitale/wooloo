@@ -192,7 +192,12 @@ extension WoolooTheme {
 
     /// Herdr agent states: working, blocked, done (finished, not yet seen), idle (seen).
     /// Colors follow Herdr's `status_color` (herdr src/client/shell.rs, v0.9.3).
+    /// The pixel themes follow the Windows app instead: a finished, unseen agent is green and a seen one gray.
     func agentStatus(_ status: String?) -> Color {
+        if isPixel {
+            if status == "done" { return success }
+            if status == "idle" { return muted }
+        }
         switch status {
         case "working": return Self.color(herdr.yellow)
         case "blocked": return Self.color(herdr.red)
