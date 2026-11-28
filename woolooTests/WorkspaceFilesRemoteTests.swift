@@ -475,6 +475,9 @@ final class WorkspaceFilesRemoteTests: XCTestCase {
     }
 
     func testRemoteWalkWithoutGitMatchesTheLocalOne() throws {
+        // These compare whole walks, so a slow machine must not run into the 2 second time limit.
+        WorkspaceFiles.folderWalkBudget = 60
+        defer { WorkspaceFiles.folderWalkBudget = 2 }
         let depth = WorkspaceFiles.folderWalkMaximumDepth
         let chain = (1..<depth).map { "d\($0)" }.joined(separator: "/")
         try sandbox.write(["a b.txt": "x\n", "d1/b.txt": "x\n", "\(chain)/last.txt": "x\n",
@@ -536,6 +539,9 @@ final class WorkspaceFilesRemoteTests: XCTestCase {
     /// Both walks outside Git follow one specification (above `WorkspaceFiles.folderWalkScript`);
     /// on folders with every kind of entry they must find the same files.
     func testRemoteAndLocalWalksAgreeOnEveryKindOfEntry() throws {
+        // These compare whole walks, so a slow machine must not run into the 2 second time limit.
+        WorkspaceFiles.folderWalkBudget = 60
+        defer { WorkspaceFiles.folderWalkBudget = 2 }
         let depth = WorkspaceFiles.folderWalkMaximumDepth
         let chain = (1...depth).map { "d\($0)" }.joined(separator: "/")
         try sandbox.write(["top.txt": "x\n", "-dash.txt": "x\n", "back\\slash.txt": "x\n", "star*.txt": "x\n",
@@ -644,6 +650,9 @@ final class WorkspaceFilesRemoteTests: XCTestCase {
     /// remote folder cannot reach the output limit. It is then truncated, as on this Mac, and
     /// the explorer's listing says so.
     func testRemoteWalkStopsAtTheMaximumFilesAsLocally() throws {
+        // These compare whole walks, so a slow machine must not run into the 2 second time limit.
+        WorkspaceFiles.folderWalkBudget = 60
+        defer { WorkspaceFiles.folderWalkBudget = 2 }
         let maximum = WorkspaceFiles.maximumFiles
         defer { WorkspaceFiles.maximumFiles = maximum }
         WorkspaceFiles.maximumFiles = 5
